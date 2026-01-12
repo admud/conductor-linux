@@ -9,6 +9,7 @@ Inspired by [Conductor](https://conductor.build/) for Mac.
 - Run multiple Claude Code instances simultaneously
 - Each agent gets an isolated git worktree (no conflicts)
 - Monitor all agents from a single dashboard
+- **TUI Dashboard** - Visual interface to monitor agents in real-time
 - View diffs and changes across all agents
 - Merge changes back when ready
 
@@ -23,16 +24,21 @@ Inspired by [Conductor](https://conductor.build/) for Mac.
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/conductor-linux.git
+git clone https://github.com/admud/conductor-linux.git
 cd conductor-linux
 
+# Install dependencies (for TUI dashboard)
+pip install -r requirements.txt
+
 # Make executable and add to PATH
-chmod +x conductor-linux
+chmod +x conductor-linux conductor-ui
 sudo ln -sf $(pwd)/conductor-linux /usr/local/bin/conductor-linux
+sudo ln -sf $(pwd)/conductor-ui /usr/local/bin/conductor-ui
 
 # Or add to your local bin
 mkdir -p ~/.local/bin
 ln -sf $(pwd)/conductor-linux ~/.local/bin/conductor-linux
+ln -sf $(pwd)/conductor-ui ~/.local/bin/conductor-ui
 ```
 
 ## Quick Start
@@ -104,6 +110,35 @@ Options:
     ├── myrepo-feature-1-143022/   # Isolated worktree
     └── myrepo-feature-2-143045/   # Another worktree
 ```
+
+## TUI Dashboard
+
+Launch the visual dashboard to monitor all agents in real-time:
+
+```bash
+conductor-ui
+```
+
+```
+┌─────────────────────────────────────┬──────────────────────────────────────────────┐
+│ AGENTS                              │ myrepo:feature-1 - Add authentication        │
+│─────────────────────────────────────│──────────────────────────────────────────────│
+│ ● [1] myrepo:feature-1 clean        │                                              │
+│ ● [2] myrepo:feature-2 +3           │ I'll help you implement authentication...    │
+│ ● [3] myrepo:bugfix-99 clean        │                                              │
+│                                     │ Let me first check the existing code...      │
+│                                     │                                              │
+├─────────────────────────────────────┴──────────────────────────────────────────────┤
+│ 3 agent(s) running | r=refresh a=attach k=kill q=quit                              │
+└────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Keyboard shortcuts:**
+- `↑/↓` - Select agent
+- `r` - Refresh status
+- `a` - Attach to selected agent's terminal
+- `k` - Kill selected agent
+- `q` - Quit dashboard
 
 ## Tips
 
