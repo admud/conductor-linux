@@ -1,0 +1,514 @@
+#!/usr/bin/env python3
+"""
+Conductor Linux - Manage multiple Claude Code agents on git worktrees
+A Linux equivalent of Conductor (https://docs.conductor.build/)
+
+Features:
+- Run multiple Claude Code instances in parallel
+- Each agent gets an isolated worktree
+- View diffs and status across all agents
+- Merge changes back to main branches
+"""
+
+import os
+import sys
+import json
+import subprocess
+import argparse
+from pathlib import Path
+from datetime import datetime
+from typing import Optional, List
+
+CONDUCTOR_HOME = Path.home() / ".conductor"
+CONFIG_FILE = CONDUCTOR_HOME / "config.json"
+REPOS_DIR = CONDUCTOR_HOME / "repos"
+WORKTREES_DIR = CONDUCTOR_HOME / "worktrees"
+
+# Colors for terminal output
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+
+def c(text, color):
+    """Colorize text."""
+    return f"{color}{text}{Colors.ENDC}"
+
+def init_conductor():
+    """Initialize conductor directories and config."""
+    CONDUCTOR_HOME.mkdir(exist_ok=True)
+    REPOS_DIR.mkdir(exist_ok=True)
+    WORKTREES_DIR.mkdir(exist_ok=True)
+    if not CONFIG_FILE.exists():
+        save_config({"repos": {}, "agents": {}})
+
+def load_config() -> dict:
+    """Load conductor configuration."""
+    if CONFIG_FILE.exists():
+        return json.loads(CONFIG_FILE.read_text())
+    return {"repos": {}, "agents": {}}
+
+def save_config(config: dict):
+    """Save conductor configuration."""
+    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+
+def run_cmd(cmd: str, cwd: Optional[str] = None, capture: bool = True) -> subprocess.CompletedProcess:
+    """Run a shell command."""
+    return subprocess.run(cmd, shell=True, cwd=cwd, capture_output=capture, text=True)
+
+def check_dependencies():
+    """Check if required dependencies are installed."""
+    deps = {"git": "git --version", "tmux": "tmux -V", "claude": "which claude"}
+    missing = []
+    for name, cmd in deps.items():
+        if run_cmd(cmd).returncode != 0:
+            missing.append(name)
+    return missing
+
+# ============================================================
+# COMMANDS
+# ============================================================
+
+def cmd_add(args):
+    """Add/clone a repository."""
+    repo_url = args.repo
+    name = args.name or Path(repo_url.rstrip("/").rstrip(".git")).name
+    repo_path = REPOS_DIR / name
+
+    if repo_path.exists():
+        print(c(f"Repository '{name}' already exists at {repo_path}", Colors.YELLOW))
+        return
+
+    print(c(f"Cloning {repo_url}...", Colors.CYAN))
+    result = run_cmd(f"git clone {repo_url} {repo_path}")
+
+    if result.returncode != 0:
+        print(c(f"Failed to clone: {result.stderr}", Colors.RED))
+        return
+
+    config = load_config()
+    config["repos"][name] = {
+        "path": str(repo_path),
+        "url": repo_url,
+        "added": datetime.now().isoformat()
+    }
+    save_config(config)
+    print(c(f"+ Added repository: {name}", Colors.GREEN))
+
+def cmd_list(args):
+    """List repositories and agents."""
+    config = load_config()
+
+    print(c("\n=== REPOSITORIES ===", Colors.BOLD))
+    if not config["repos"]:
+        print(c("  No repositories. Use 'conductor-linux add <repo-url>'", Colors.DIM))
+    for name, info in config["repos"].items():
+        print(f"  {c(name, Colors.CYAN)}: {info['path']}")
+
+    print(c("\n=== ACTIVE AGENTS ===", Colors.BOLD))
+    agents = get_active_agents()
+    if not agents:
+        print(c("  No active agents. Use 'conductor-linux spawn <repo> <branch>'", Colors.DIM))
+    for i, agent in enumerate(agents, 1):
+        status = c("*", Colors.GREEN)
+        print(f"  {status} [{i}] {c(agent['repo'], Colors.CYAN)}:{c(agent['branch'], Colors.YELLOW)}")
+        if agent.get('task'):
+            print(f"       task: {agent['task'][:50]}...")
+    print()
+
+def cmd_spawn(args):
+    """Spawn a new Claude Code agent on a worktree."""
+    repo_name = args.repo
+    branch_name = args.branch
+    task = args.task or ""
+    auto_accept = args.auto_accept
+
+    config = load_config()
+
+    if repo_name not in config["repos"]:
+        print(c(f"Repository '{repo_name}' not found. Use 'conductor-linux add' first.", Colors.RED))
+        return
+
+    repo_path = Path(config["repos"][repo_name]["path"])
+    timestamp = datetime.now().strftime('%H%M%S')
+    worktree_name = f"{repo_name}-{branch_name}-{timestamp}"
+    worktree_path = WORKTREES_DIR / worktree_name
+
+    # Check if branch exists remotely or locally
+    result = run_cmd(f"git rev-parse --verify {branch_name} 2>/dev/null || git rev-parse --verify origin/{branch_name} 2>/dev/null", cwd=repo_path)
+
+    if result.returncode != 0:
+        # Branch doesn't exist, create from current HEAD
+        print(c(f"Creating new branch: {branch_name}", Colors.YELLOW))
+        base_branch = run_cmd("git rev-parse --abbrev-ref HEAD", cwd=repo_path).stdout.strip()
+        run_cmd(f"git branch {branch_name} {base_branch}", cwd=repo_path)
+
+    # Create worktree
+    print(c(f"Creating isolated workspace...", Colors.CYAN))
+    result = run_cmd(f"git worktree add {worktree_path} {branch_name}", cwd=repo_path)
+
+    if result.returncode != 0:
+        # Try with -B to force create/reset branch
+        result = run_cmd(f"git worktree add -B {branch_name} {worktree_path}", cwd=repo_path)
+        if result.returncode != 0:
+            print(c(f"Failed to create worktree: {result.stderr}", Colors.RED))
+            return
+
+    # Create tmux session for Claude Code
+    session_name = f"conductor-{worktree_name}"
+
+    # Ask about auto-accept mode if task provided and not already set via flag
+    if task and auto_accept is None:
+        print(c("\nAuto-accept mode allows Claude to run without permission prompts.", Colors.YELLOW))
+        print(c("WARNING: This gives the agent full control to modify files and run commands.", Colors.RED))
+        response = input(c("Enable auto-accept mode? [y/N]: ", Colors.BOLD)).strip().lower()
+        auto_accept = response in ('y', 'yes')
+
+    # Build claude command - wrap in bash to keep session alive
+    if task:
+        escaped_task = task.replace('"', '\\"')
+        if auto_accept:
+            claude_cmd = f'bash -c \'claude --dangerously-skip-permissions "{escaped_task}"; echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; read; exec bash\''
+        else:
+            # Print mode - outputs result but doesn't auto-accept
+            claude_cmd = f'bash -c \'claude -p "{escaped_task}"; echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; read; exec bash\''
+    else:
+        claude_cmd = "claude"
+
+    print(c(f"Spawning Claude Code agent...", Colors.CYAN))
+    run_cmd(f"tmux new-session -d -s {session_name} -c {worktree_path} {claude_cmd}")
+
+    # Track the agent
+    config["agents"][session_name] = {
+        "repo": repo_name,
+        "branch": branch_name,
+        "worktree": str(worktree_path),
+        "task": task,
+        "started": datetime.now().isoformat()
+    }
+    save_config(config)
+
+    print(c(f"\n+ Agent spawned!", Colors.GREEN))
+    print(f"  Session:   {c(session_name, Colors.CYAN)}")
+    print(f"  Workspace: {worktree_path}")
+    print(f"\n  {c('conductor-linux attach', Colors.YELLOW)} {len(get_active_agents())}  - View agent")
+    print(f"  {c('conductor-linux status', Colors.YELLOW)}      - See all agents")
+    print(f"  {c('conductor-linux diff', Colors.YELLOW)} {len(get_active_agents())}    - View changes\n")
+
+def get_active_agents() -> List[dict]:
+    """Get list of active conductor tmux sessions."""
+    result = run_cmd("tmux list-sessions -F '#{session_name}' 2>/dev/null")
+    if result.returncode != 0:
+        return []
+
+    config = load_config()
+    agents = []
+
+    for session in result.stdout.strip().split('\n'):
+        if session.startswith("conductor-") and session in config.get("agents", {}):
+            agent_info = config["agents"][session]
+            agents.append({
+                "session": session,
+                "repo": agent_info["repo"],
+                "branch": agent_info["branch"],
+                "worktree": agent_info["worktree"],
+                "task": agent_info.get("task", ""),
+                "started": agent_info.get("started", "")
+            })
+
+    return agents
+
+def cmd_status(args):
+    """Show detailed status of all agents."""
+    agents = get_active_agents()
+
+    print(c("\n+------------------------------------------------------------+", Colors.BOLD))
+    print(c("|              CONDUCTOR LINUX - STATUS                      |", Colors.BOLD))
+    print(c("+------------------------------------------------------------+", Colors.BOLD))
+
+    if not agents:
+        print(c("\n  No active agents.\n", Colors.DIM))
+        print(f"  Start one with: {c('conductor-linux spawn <repo> <branch>', Colors.CYAN)}\n")
+        return
+
+    for i, agent in enumerate(agents, 1):
+        # Get git status for this worktree
+        git_status = run_cmd("git status --porcelain", cwd=agent['worktree'])
+        changes = len([l for l in git_status.stdout.strip().split('\n') if l])
+
+        # Get commit count ahead of origin
+        ahead = run_cmd(f"git rev-list --count origin/{agent['branch']}..HEAD 2>/dev/null || echo 0", cwd=agent['worktree'])
+        commits_ahead = ahead.stdout.strip()
+
+        status_icon = c("*", Colors.GREEN)
+
+        print(f"\n  {status_icon} {c(f'Agent #{i}', Colors.BOLD)}")
+        print(f"    - Repo:      {c(agent['repo'], Colors.CYAN)}")
+        print(f"    - Branch:    {c(agent['branch'], Colors.YELLOW)}")
+        print(f"    - Workspace: {agent['worktree']}")
+        print(f"    - Changes:   {c(f'{changes} files', Colors.GREEN) if changes else c('clean', Colors.DIM)}")
+        print(f"    - Commits:   {commits_ahead} ahead")
+        if agent['task']:
+            print(f"    - Task:      {agent['task'][:60]}")
+
+    print(c("\n------------------------------------------------------------", Colors.DIM))
+    print(f"  Total: {c(str(len(agents)), Colors.BOLD)} agent(s) running\n")
+
+def cmd_attach(args):
+    """Attach to an agent's tmux session."""
+    session = resolve_session(args.session)
+    if not session:
+        return
+    os.system(f"tmux attach -t {session}")
+
+def cmd_diff(args):
+    """Show diff for an agent's changes."""
+    agents = get_active_agents()
+
+    if args.session:
+        session = resolve_session(args.session)
+        if not session:
+            return
+        agent = next((a for a in agents if a['session'] == session), None)
+        if agent:
+            agents = [agent]
+
+    for agent in agents:
+        print(c(f"\n=== {agent['repo']}:{agent['branch']} ===", Colors.BOLD))
+
+        # Show staged and unstaged changes
+        result = run_cmd("git diff --stat", cwd=agent['worktree'])
+        if result.stdout.strip():
+            print(c("\nUnstaged changes:", Colors.YELLOW))
+            print(result.stdout)
+
+        result = run_cmd("git diff --cached --stat", cwd=agent['worktree'])
+        if result.stdout.strip():
+            print(c("\nStaged changes:", Colors.GREEN))
+            print(result.stdout)
+
+        # Show untracked files
+        result = run_cmd("git ls-files --others --exclude-standard", cwd=agent['worktree'])
+        if result.stdout.strip():
+            print(c("\nUntracked files:", Colors.CYAN))
+            for f in result.stdout.strip().split('\n'):
+                print(f"  + {f}")
+
+        # Show recent commits
+        result = run_cmd(f"git log --oneline -5 origin/{agent['branch']}..HEAD 2>/dev/null", cwd=agent['worktree'])
+        if result.stdout.strip():
+            print(c("\nNew commits:", Colors.GREEN))
+            print(result.stdout)
+
+def cmd_merge(args):
+    """Merge an agent's changes back to origin branch."""
+    session = resolve_session(args.session)
+    if not session:
+        return
+
+    config = load_config()
+    agent = config["agents"].get(session)
+    if not agent:
+        print(c("Agent not found", Colors.RED))
+        return
+
+    worktree_path = agent['worktree']
+    branch = agent['branch']
+
+    print(c(f"\nMerging changes from {branch}...", Colors.CYAN))
+
+    # First, ensure all changes are committed in worktree
+    status = run_cmd("git status --porcelain", cwd=worktree_path)
+    if status.stdout.strip():
+        print(c("Warning: Uncommitted changes in worktree", Colors.YELLOW))
+        if not args.force:
+            print("Use --force to merge anyway")
+            return
+
+    # Push the branch
+    result = run_cmd(f"git push origin {branch}", cwd=worktree_path)
+    if result.returncode == 0:
+        print(c(f"+ Pushed {branch} to origin", Colors.GREEN))
+    else:
+        print(c(f"Push failed: {result.stderr}", Colors.RED))
+
+def cmd_kill(args):
+    """Kill an agent and optionally clean up its worktree."""
+    session = resolve_session(args.session)
+    if not session:
+        return
+
+    config = load_config()
+
+    # Kill tmux session
+    run_cmd(f"tmux kill-session -t {session}")
+    print(c(f"+ Killed session: {session}", Colors.GREEN))
+
+    # Clean up worktree if requested
+    if session in config.get("agents", {}):
+        agent_info = config["agents"][session]
+        worktree_path = agent_info["worktree"]
+        repo_path = config["repos"][agent_info["repo"]]["path"]
+
+        if args.cleanup:
+            print(c(f"Removing worktree...", Colors.CYAN))
+            run_cmd(f"git worktree remove {worktree_path} --force", cwd=repo_path)
+            print(c(f"+ Removed: {worktree_path}", Colors.GREEN))
+
+        del config["agents"][session]
+        save_config(config)
+
+def cmd_killall(args):
+    """Kill all agents."""
+    agents = get_active_agents()
+    config = load_config()
+
+    for agent in agents:
+        print(f"Killing {agent['session']}...")
+        run_cmd(f"tmux kill-session -t {agent['session']}")
+
+        if args.cleanup and agent['session'] in config.get("agents", {}):
+            agent_info = config["agents"][agent['session']]
+            repo_path = config["repos"][agent_info["repo"]]["path"]
+            run_cmd(f"git worktree remove {agent_info['worktree']} --force", cwd=repo_path)
+
+    config["agents"] = {}
+    save_config(config)
+    print(c(f"+ Killed {len(agents)} agent(s)", Colors.GREEN))
+
+def cmd_logs(args):
+    """Show recent output from an agent's tmux session."""
+    session = resolve_session(args.session)
+    if not session:
+        return
+
+    lines = args.lines or 50
+    result = run_cmd(f"tmux capture-pane -t {session} -p -S -{lines}")
+    print(result.stdout)
+
+def resolve_session(identifier: str) -> Optional[str]:
+    """Resolve a session identifier (number or name) to session name."""
+    if identifier.isdigit():
+        agents = get_active_agents()
+        idx = int(identifier) - 1
+        if 0 <= idx < len(agents):
+            return agents[idx]['session']
+        print(c(f"Invalid agent number: {identifier}", Colors.RED))
+        return None
+
+    if not identifier.startswith("conductor-"):
+        identifier = f"conductor-{identifier}"
+    return identifier
+
+def main():
+    init_conductor()
+
+    parser = argparse.ArgumentParser(
+        description=c("Conductor Linux", Colors.BOLD) + " - Manage multiple Claude Code agents",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+{c('Examples:', Colors.BOLD)}
+  conductor-linux add https://github.com/user/repo.git
+  conductor-linux spawn myrepo feature-auth --task "Implement OAuth login"
+  conductor-linux spawn myrepo feature-tests --task "Add unit tests"
+  conductor-linux status
+  conductor-linux attach 1
+  conductor-linux diff
+  conductor-linux kill 1 --cleanup
+
+{c('Workflow:', Colors.BOLD)}
+  1. Add a repo:     conductor-linux add <git-url>
+  2. Spawn agents:   conductor-linux spawn <repo> <branch> --task "..."
+  3. Monitor:        conductor-linux status
+  4. Review:         conductor-linux diff
+  5. Merge:          conductor-linux merge <agent>
+  6. Cleanup:        conductor-linux kill <agent> --cleanup
+        """
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    # add
+    p = subparsers.add_parser("add", help="Add/clone a repository")
+    p.add_argument("repo", help="Git repository URL")
+    p.add_argument("--name", help="Custom name for the repo")
+
+    # list
+    subparsers.add_parser("list", help="List repos and agents")
+
+    # spawn
+    p = subparsers.add_parser("spawn", help="Spawn a new Claude Code agent")
+    p.add_argument("repo", help="Repository name")
+    p.add_argument("branch", help="Branch to work on")
+    p.add_argument("--task", "-t", help="Task/prompt for the agent")
+    p.add_argument("--auto-accept", "-y", action="store_true", default=None, help="Enable auto-accept mode (skip permission prompts)")
+    p.add_argument("--no-auto-accept", "-n", action="store_false", dest="auto_accept", help="Disable auto-accept mode (interactive)")
+
+    # status
+    subparsers.add_parser("status", help="Show detailed agent status")
+
+    # attach
+    p = subparsers.add_parser("attach", help="Attach to an agent's terminal")
+    p.add_argument("session", help="Agent number or session name")
+
+    # diff
+    p = subparsers.add_parser("diff", help="Show changes made by agents")
+    p.add_argument("session", nargs="?", help="Agent number (optional, shows all if omitted)")
+
+    # merge
+    p = subparsers.add_parser("merge", help="Push agent's branch to origin")
+    p.add_argument("session", help="Agent number or session name")
+    p.add_argument("--force", "-f", action="store_true", help="Merge even with uncommitted changes")
+
+    # logs
+    p = subparsers.add_parser("logs", help="Show agent's terminal output")
+    p.add_argument("session", help="Agent number or session name")
+    p.add_argument("--lines", "-n", type=int, default=50, help="Number of lines")
+
+    # kill
+    p = subparsers.add_parser("kill", help="Kill an agent")
+    p.add_argument("session", help="Agent number or session name")
+    p.add_argument("--cleanup", "-c", action="store_true", help="Also remove worktree")
+
+    # killall
+    p = subparsers.add_parser("killall", help="Kill all agents")
+    p.add_argument("--cleanup", "-c", action="store_true", help="Also remove all worktrees")
+
+    args = parser.parse_args()
+
+    # Check dependencies on first meaningful command
+    if args.command in ["spawn", "add"]:
+        missing = check_dependencies()
+        if missing:
+            print(c(f"Missing dependencies: {', '.join(missing)}", Colors.RED))
+            print("Please install them first.")
+            return
+
+    if args.command is None:
+        parser.print_help()
+        return
+
+    commands = {
+        "add": cmd_add,
+        "list": cmd_list,
+        "spawn": cmd_spawn,
+        "status": cmd_status,
+        "attach": cmd_attach,
+        "diff": cmd_diff,
+        "merge": cmd_merge,
+        "logs": cmd_logs,
+        "kill": cmd_kill,
+        "killall": cmd_killall,
+    }
+
+    if args.command in commands:
+        commands[args.command](args)
+
+if __name__ == "__main__":
+    main()
