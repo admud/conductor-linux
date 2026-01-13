@@ -1,8 +1,14 @@
-# Conductor Linux
+# CDL (Conductor Linux)
 
 A CLI tool to manage multiple [Claude Code](https://claude.ai/code) agents working in parallel on isolated git worktrees.
 
 Inspired by [Conductor](https://conductor.build/) for Mac.
+
+## Quick Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.sh | bash
+```
 
 ## Features
 
@@ -20,73 +26,67 @@ Inspired by [Conductor](https://conductor.build/) for Mac.
 - tmux
 - [Claude Code CLI](https://claude.ai/code) (`claude`)
 
-## Installation
+## Manual Installation
 
 ```bash
-# Clone the repo
-git clone https://github.com/admud/conductor-linux.git
-cd conductor-linux
-
-# Install dependencies (for TUI dashboard)
+git clone https://github.com/admud/conductor-linux.git ~/.cdl
+cd ~/.cdl
 pip install -r requirements.txt
+chmod +x cdl cdl-ui
 
-# Make executable and add to PATH
-chmod +x conductor-linux conductor-ui
-sudo ln -sf $(pwd)/conductor-linux /usr/local/bin/conductor-linux
-sudo ln -sf $(pwd)/conductor-ui /usr/local/bin/conductor-ui
-
-# Or add to your local bin
-mkdir -p ~/.local/bin
-ln -sf $(pwd)/conductor-linux ~/.local/bin/conductor-linux
-ln -sf $(pwd)/conductor-ui ~/.local/bin/conductor-ui
+# Add to PATH (add to your .bashrc or .zshrc)
+export PATH="$HOME/.cdl:$PATH"
 ```
 
 ## Quick Start
 
 ```bash
 # 1. Add a repository
-conductor-linux add https://github.com/user/repo.git
+cdl add https://github.com/user/repo.git
 
 # 2. Spawn agents on different branches
-conductor-linux spawn myrepo feature-auth --task "Implement OAuth login"
-conductor-linux spawn myrepo feature-tests --task "Add unit tests"
-conductor-linux spawn myrepo bugfix-123 --task "Fix the login bug"
+cdl spawn myrepo feature-auth --task "Implement OAuth login"
+cdl spawn myrepo feature-tests --task "Add unit tests"
 
 # 3. Monitor all agents
-conductor-linux status
+cdl status
 
-# 4. View an agent's terminal
-conductor-linux attach 1
+# 4. Launch TUI dashboard
+cdl-ui
 
-# 5. Review changes
-conductor-linux diff
+# 5. View an agent's terminal
+cdl attach 1
 
-# 6. Push changes when ready
-conductor-linux merge 1
+# 6. Review changes
+cdl diff
 
-# 7. Cleanup
-conductor-linux kill 1 --cleanup
+# 7. Push changes when ready
+cdl merge 1
+
+# 8. Cleanup
+cdl kill 1 --cleanup
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `add <url>` | Clone and register a repository |
-| `list` | List all repos and active agents |
-| `spawn <repo> <branch> [options]` | Start a new Claude Code agent |
-| `status` | Show detailed status of all agents |
-| `attach <n>` | Attach to agent's tmux session |
-| `diff [n]` | Show git diff for agent(s) |
-| `logs <n>` | View agent's terminal output |
-| `merge <n>` | Push agent's branch to origin |
-| `kill <n>` | Stop an agent |
-| `killall` | Stop all agents |
+| `cdl add <url>` | Clone and register a repository |
+| `cdl list` | List all repos and active agents |
+| `cdl spawn <repo> <branch> [options]` | Start a new Claude Code agent |
+| `cdl status` | Show detailed status of all agents |
+| `cdl attach <n>` | Attach to agent's tmux session |
+| `cdl diff [n]` | Show git diff for agent(s) |
+| `cdl logs <n>` | View agent's terminal output |
+| `cdl merge <n>` | Push agent's branch to origin |
+| `cdl kill <n>` | Stop an agent |
+| `cdl killall` | Stop all agents |
+| `cdl-ui` | Launch TUI dashboard |
 
 ### Spawn Options
 
 ```bash
-conductor-linux spawn <repo> <branch> [options]
+cdl spawn <repo> <branch> [options]
 
 Options:
   -t, --task "..."     Task/prompt for the agent
@@ -116,21 +116,19 @@ Options:
 Launch the visual dashboard to monitor all agents in real-time:
 
 ```bash
-conductor-ui
+cdl-ui
 ```
 
 ```
-┌─────────────────────────────────────┬──────────────────────────────────────────────┐
-│ AGENTS                              │ myrepo:feature-1 - Add authentication        │
-│─────────────────────────────────────│──────────────────────────────────────────────│
-│ ● [1] myrepo:feature-1 clean        │                                              │
-│ ● [2] myrepo:feature-2 +3           │ I'll help you implement authentication...    │
-│ ● [3] myrepo:bugfix-99 clean        │                                              │
-│                                     │ Let me first check the existing code...      │
-│                                     │                                              │
-├─────────────────────────────────────┴──────────────────────────────────────────────┤
-│ 3 agent(s) running | r=refresh a=attach k=kill q=quit                              │
-└────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────┐┌──────────────────────────────────────┐
+│ AGENTS                               ││ myrepo:feature-1 - Add authentication│
+│                                      ││                                      │
+│ ● [1] myrepo:feature-1 ok            ││ I'll help you implement auth...      │
+│ ● [2] myrepo:feature-2 +3            ││                                      │
+│ ● [3] myrepo:bugfix-99 ok            ││ Let me check the existing code...    │
+│                                      ││                                      │
+└──────────────────────────────────────┘└──────────────────────────────────────┘
+ q Quit  r Refresh  a Attach  k Kill
 ```
 
 **Keyboard shortcuts:**
@@ -148,18 +146,18 @@ When attached to an agent, press `Ctrl+B` then `D` to detach without killing it.
 ### Run multiple agents
 ```bash
 # Spawn 3 agents working on different features
-conductor-linux spawn myrepo auth --task "Add authentication" -n
-conductor-linux spawn myrepo api --task "Create REST API" -n
-conductor-linux spawn myrepo tests --task "Write tests" -n
+cdl spawn myrepo auth --task "Add authentication" -n
+cdl spawn myrepo api --task "Create REST API" -n
+cdl spawn myrepo tests --task "Write tests" -n
 
 # Watch them all
-watch -n 5 conductor-linux status
+cdl-ui
 ```
 
 ### View without attaching
 ```bash
 # See recent output
-conductor-linux logs 1 --lines 100
+cdl logs 1 --lines 100
 ```
 
 ## License
