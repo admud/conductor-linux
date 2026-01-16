@@ -1,42 +1,41 @@
 #!/usr/bin/env python3
 """
-Conductor Linux - TUI Dashboard
+CDL (Conductor Linux) - TUI Dashboard
 A visual interface to monitor and manage Claude Code agents.
 """
 
-import subprocess
-import json
+from __future__ import annotations
+
+import os
+import sys
 from pathlib import Path
+
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical, ScrollableContainer
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, Footer, Static, ListView, ListItem, Label, RichLog
 from textual.reactive import reactive
 
-CONDUCTOR_HOME = Path.home() / ".conductor"
-CONFIG_FILE = CONDUCTOR_HOME / "config.json"
+# Add src to path for imports when running directly
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-def load_config() -> dict:
-    if CONFIG_FILE.exists():
-        return json.loads(CONFIG_FILE.read_text())
-    return {"repos": {}, "agents": {}}
+from cdl.core.config import load_config, save_config
+from cdl.core import git, tmux
 
-def run_cmd(cmd: str, cwd=None) -> str:
-    result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
-    return result.stdout
 
-def get_active_agents() -> list:
-    result = run_cmd("tmux list-sessions -F '#{session_name}' 2>/dev/null")
-    if not result.strip():
-        return []
-
+def get_active_agents() -> list[dict]:
+    """Get list of active conductor tmux sessions with status."""
+    sessions = tmux.list_sessions()
     config = load_config()
     agents = []
 
-    for session in result.strip().split('\n'):
+    for session in sessions:
         if session.startswith("conductor-") and session in config.get("agents", {}):
             agent_info = config["agents"][session]
-            git_status = run_cmd("git status --porcelain", cwd=agent_info['worktree'])
-            changes = len([l for l in git_status.strip().split('\n') if l])
+            worktree = Path(agent_info["worktree"])
+
+            # Get change count
+            git_result = git.status(worktree)
+            changes = len([line for line in git_result.stdout.strip().split("\n") if line])
 
             agents.append({
                 "session": session,
@@ -48,22 +47,25 @@ def get_active_agents() -> list:
             })
     return agents
 
-def get_agent_logs(session: str, lines: int = 50) -> str:
-    return run_cmd(f"tmux capture-pane -t {session} -p -S -{lines} 2>/dev/null")
-
 
 class AgentItem(ListItem):
+    """List item representing an agent."""
+
     def __init__(self, agent: dict, index: int):
         super().__init__()
         self.agent = agent
         self.index = index
 
     def compose(self) -> ComposeResult:
-        changes = f"[yellow]+{self.agent['changes']}[/]" if self.agent['changes'] else "[dim]ok[/]"
-        yield Label(f"[green]●[/] [{self.index}] [cyan]{self.agent['repo']}[/]:[yellow]{self.agent['branch']}[/] {changes}")
+        changes = f"[yellow]+{self.agent['changes']}[/]" if self.agent["changes"] else "[dim]ok[/]"
+        yield Label(
+            f"[green]\u25cf[/] [{self.index}] [cyan]{self.agent['repo']}[/]:[yellow]{self.agent['branch']}[/] {changes}"
+        )
 
 
 class ConductorUI(App):
+    """TUI Dashboard for Conductor Linux."""
+
     CSS = """
     Screen {
         layout: horizontal;
@@ -143,7 +145,7 @@ class ConductorUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._agents = []
+        self._agents: list[dict] = []
         self.refresh_agents()
         self.set_interval(2, self.refresh_agents)
         self.set_interval(1, self.refresh_logs)
@@ -160,18 +162,20 @@ class ConductorUI(App):
 
     def refresh_logs(self) -> None:
         if self.selected_agent:
-            logs = get_agent_logs(self.selected_agent['session'])
+            logs = tmux.capture_pane(self.selected_agent["session"])
             log_view = self.query_one("#log-view", RichLog)
             log_view.clear()
-            for line in logs.split('\n'):
+            for line in logs.split("\n"):
                 log_view.write(line)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, AgentItem):
             self.selected_agent = event.item.agent
             header = self.query_one("#main-header", Static)
-            task = self.selected_agent.get('task', 'No task')[:60]
-            header.update(f"[bold cyan]{self.selected_agent['repo']}[/]:[yellow]{self.selected_agent['branch']}[/] - {task}")
+            task = self.selected_agent.get("task", "No task")[:60]
+            header.update(
+                f"[bold cyan]{self.selected_agent['repo']}[/]:[yellow]{self.selected_agent['branch']}[/] - {task}"
+            )
             self.refresh_logs()
 
     def action_refresh(self) -> None:
@@ -181,25 +185,33 @@ class ConductorUI(App):
 
     def action_attach(self) -> None:
         if self.selected_agent:
-            import os
             self.exit()
-            os.system(f"tmux attach -t {self.selected_agent['session']}")
+            # Use execvp for safety
+            os.execvp("tmux", ["tmux", "attach", "-t", self.selected_agent["session"]])
 
     def action_kill_agent(self) -> None:
         if self.selected_agent:
-            run_cmd(f"tmux kill-session -t {self.selected_agent['session']}")
+            tmux.kill_session(self.selected_agent["session"])
+
             config = load_config()
-            if self.selected_agent['session'] in config.get("agents", {}):
-                del config["agents"][self.selected_agent['session']]
-                CONFIG_FILE.write_text(json.dumps(config, indent=2))
+            if self.selected_agent["session"] in config.get("agents", {}):
+                del config["agents"][self.selected_agent["session"]]
+                save_config(config)
+
             self.selected_agent = None
             self.refresh_agents()
+
             header = self.query_one("#main-header", Static)
             header.update("[bold]Agent killed. Select another.[/]")
             log_view = self.query_one("#log-view", RichLog)
             log_view.clear()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run the TUI application."""
     app = ConductorUI()
     app.run()
+
+
+if __name__ == "__main__":
+    main()
