@@ -8,6 +8,7 @@ import sys
 from .utils.colors import Colors, c
 from .utils.process import check_command_exists
 from .core.config import init_config
+from .core.user_config import load_user_config
 from .commands import repo, agent, monitor, sync
 
 
@@ -15,6 +16,15 @@ def check_dependencies() -> list[str]:
     """Check if required dependencies are installed."""
     deps = ["git", "tmux", "claude"]
     return [dep for dep in deps if not check_command_exists(dep)]
+
+
+def add_json_flag(parser: argparse.ArgumentParser) -> None:
+    """Add --json flag to a parser."""
+    parser.add_argument(
+        "--json", "-j",
+        action="store_true",
+        help="Output in JSON format (for scripting)",
+    )
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -27,19 +37,16 @@ def create_parser() -> argparse.ArgumentParser:
 {c('Examples:', Colors.BOLD)}
   cdl add https://github.com/user/repo.git
   cdl spawn myrepo feature-auth --task "Implement OAuth login"
-  cdl spawn myrepo feature-tests --task "Add unit tests"
-  cdl status
-  cdl attach 1
-  cdl diff
-  cdl kill 1 --cleanup
+  cdl status --json | jq '.agents[]'
+  cdl attach    # (fzf picker if no arg)
+  cdl logs -f 1 # (live tail)
+  cdl k 1 -c    # (short alias for kill --cleanup)
 
-{c('Workflow:', Colors.BOLD)}
-  1. Add a repo:     cdl add <git-url>
-  2. Spawn agents:   cdl spawn <repo> <branch> --task "..."
-  3. Monitor:        cdl status
-  4. Review:         cdl diff
-  5. Merge:          cdl merge <agent>
-  6. Cleanup:        cdl kill <agent> --cleanup
+{c('Aliases:', Colors.BOLD)}
+  s = status, a = attach, l = logs, k = kill, d = diff
+
+{c('Config:', Colors.BOLD)}
+  ~/.conductor/config.toml
         """,
     )
 
@@ -51,57 +58,71 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--name", help="Custom name for the repo")
 
     # list
-    subparsers.add_parser("list", help="List repos and agents")
+    p = subparsers.add_parser("list", help="List repos and agents")
+    add_json_flag(p)
 
     # spawn
     p = subparsers.add_parser("spawn", help="Spawn a new Claude Code agent")
-    p.add_argument("repo", help="Repository name")
-    p.add_argument("branch", help="Branch to work on")
+    p.add_argument("repo", nargs="?", help="Repository name (fzf picker if omitted)")
+    p.add_argument("branch", nargs="?", help="Branch to work on")
     p.add_argument("--task", "-t", help="Task/prompt for the agent")
     p.add_argument(
-        "--auto-accept",
-        "-y",
+        "--auto-accept", "-y",
         action="store_true",
         default=None,
         help="Enable auto-accept mode (skip permission prompts)",
     )
     p.add_argument(
-        "--no-auto-accept",
-        "-n",
+        "--no-auto-accept", "-n",
         action="store_false",
         dest="auto_accept",
         help="Disable auto-accept mode (interactive)",
     )
+    p.add_argument("--label", "-l", help="Label for grouping agents")
 
-    # status
-    subparsers.add_parser("status", help="Show detailed agent status")
+    # status (alias: s)
+    p = subparsers.add_parser("status", aliases=["s"], help="Show detailed agent status")
+    add_json_flag(p)
+    p.add_argument("--label", "-l", help="Filter by label")
 
-    # attach
-    p = subparsers.add_parser("attach", help="Attach to an agent's terminal")
-    p.add_argument("session", help="Agent number or session name")
+    # attach (alias: a)
+    p = subparsers.add_parser("attach", aliases=["a"], help="Attach to an agent's terminal")
+    p.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
 
-    # diff
-    p = subparsers.add_parser("diff", help="Show changes made by agents")
+    # diff (alias: d)
+    p = subparsers.add_parser("diff", aliases=["d"], help="Show changes made by agents")
     p.add_argument("session", nargs="?", help="Agent number (optional, shows all if omitted)")
+    p.add_argument("--tool", help="Diff tool (delta, difftastic, etc.)")
 
     # merge
     p = subparsers.add_parser("merge", help="Push agent's branch to origin")
-    p.add_argument("session", help="Agent number or session name")
+    p.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
     p.add_argument("--force", "-f", action="store_true", help="Merge even with uncommitted changes")
 
-    # logs
-    p = subparsers.add_parser("logs", help="Show agent's terminal output")
-    p.add_argument("session", help="Agent number or session name")
+    # logs (alias: l)
+    p = subparsers.add_parser("logs", aliases=["l"], help="Show agent's terminal output")
+    p.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
     p.add_argument("--lines", "-n", type=int, default=50, help="Number of lines")
+    p.add_argument("--follow", "-f", action="store_true", help="Follow output (like tail -f)")
 
-    # kill
-    p = subparsers.add_parser("kill", help="Kill an agent")
-    p.add_argument("session", help="Agent number or session name")
+    # kill (alias: k)
+    p = subparsers.add_parser("kill", aliases=["k"], help="Kill an agent")
+    p.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
     p.add_argument("--cleanup", "-c", action="store_true", help="Also remove worktree")
 
     # killall
     p = subparsers.add_parser("killall", help="Kill all agents")
     p.add_argument("--cleanup", "-c", action="store_true", help="Also remove all worktrees")
+    p.add_argument("--label", "-l", help="Only kill agents with this label")
+
+    # pick - fzf picker helper
+    p = subparsers.add_parser("pick", help="Interactive agent picker (for scripting)")
+    p.add_argument("--format", "-f", default="number", choices=["number", "session", "json"],
+                   help="Output format")
+
+    # completions
+    p = subparsers.add_parser("completions", help="Generate shell completions")
+    p.add_argument("shell", choices=["bash", "zsh", "fish"], help="Shell type")
 
     return parser
 
@@ -109,9 +130,14 @@ def create_parser() -> argparse.ArgumentParser:
 def main() -> int:
     """Main CLI entry point."""
     init_config()
+    user_config = load_user_config()
 
     parser = create_parser()
     args = parser.parse_args()
+
+    # Apply user config defaults
+    if hasattr(args, 'auto_accept') and args.auto_accept is None:
+        args.auto_accept = user_config.get("defaults", {}).get("auto_accept", None)
 
     # Check dependencies on first meaningful command
     if args.command in ["spawn", "add"]:
@@ -125,6 +151,11 @@ def main() -> int:
         parser.print_help()
         return 0
 
+    # Map aliases to canonical commands
+    command = args.command
+    alias_map = {"s": "status", "a": "attach", "l": "logs", "k": "kill", "d": "diff"}
+    command = alias_map.get(command, command)
+
     commands = {
         "add": repo.cmd_add,
         "list": repo.cmd_list,
@@ -136,14 +167,23 @@ def main() -> int:
         "logs": monitor.cmd_logs,
         "kill": agent.cmd_kill,
         "killall": agent.cmd_killall,
+        "pick": monitor.cmd_pick,
+        "completions": cmd_completions,
     }
 
-    if args.command in commands:
-        commands[args.command](args)
-        return 0
+    if command in commands:
+        result = commands[command](args)
+        return result if isinstance(result, int) else 0
 
     parser.print_help()
     return 1
+
+
+def cmd_completions(args) -> int:
+    """Generate shell completions."""
+    from .utils.completions import generate_completions
+    print(generate_completions(args.shell))
+    return 0
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -54,6 +55,7 @@ def get_active_agents() -> list[dict]:
                 "branch": agent_info["branch"],
                 "worktree": agent_info["worktree"],
                 "task": agent_info.get("task", ""),
+                "label": agent_info.get("label", ""),
                 "started": agent_info.get("started", ""),
             })
 
@@ -63,6 +65,32 @@ def get_active_agents() -> list[dict]:
 def cmd_list(args) -> None:
     """List repositories and agents."""
     config = load_config()
+    agents = get_active_agents()
+
+    # JSON output mode
+    if hasattr(args, 'json') and args.json:
+        output = {
+            "repos": {
+                name: {
+                    "path": info["path"],
+                    "url": info.get("url", ""),
+                    "added": info.get("added", ""),
+                }
+                for name, info in config["repos"].items()
+            },
+            "agents": [
+                {
+                    "number": i,
+                    "session": a["session"],
+                    "repo": a["repo"],
+                    "branch": a["branch"],
+                    "task": a.get("task", ""),
+                }
+                for i, a in enumerate(agents, 1)
+            ],
+        }
+        print(json.dumps(output, indent=2))
+        return
 
     print(c("\n=== REPOSITORIES ===", Colors.BOLD))
     if not config["repos"]:
@@ -71,7 +99,6 @@ def cmd_list(args) -> None:
         print(f"  {c(name, Colors.CYAN)}: {info['path']}")
 
     print(c("\n=== ACTIVE AGENTS ===", Colors.BOLD))
-    agents = get_active_agents()
     if not agents:
         print(c("  No active agents. Use 'cdl spawn <repo> <branch>'", Colors.DIM))
     for i, agent in enumerate(agents, 1):
