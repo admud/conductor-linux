@@ -15,16 +15,21 @@ curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.
 - Run multiple Claude Code instances simultaneously
 - Each agent gets an isolated git worktree (no conflicts)
 - Monitor all agents from a single dashboard
-- **TUI Dashboard** - Visual interface to monitor agents in real-time
+- **TUI Dashboard** - Visual interface with clickable buttons
+- **JSON output** - Scriptable with `jq`
+- **Shell completions** - bash, zsh, fish
+- **fzf integration** - Interactive agent picker
+- **Config file** - Customize defaults
 - View diffs and changes across all agents
 - Merge changes back when ready
 
 ## Requirements
 
-- Python 3.7+
+- Python 3.10+
 - git
 - tmux
 - [Claude Code CLI](https://claude.ai/code) (`claude`)
+- Optional: `fzf` for interactive picker
 
 ## Manual Installation
 
@@ -32,10 +37,13 @@ curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.
 git clone https://github.com/admud/conductor-linux.git ~/.cdl
 cd ~/.cdl
 pip install -r requirements.txt
-chmod +x cdl cdl-ui
 
 # Add to PATH (add to your .bashrc or .zshrc)
-export PATH="$HOME/.cdl:$PATH"
+export PATH="$HOME/.cdl/bin:$PATH"
+
+# Enable shell completions (optional)
+eval "$(cdl completions bash)"  # for bash
+eval "$(cdl completions zsh)"   # for zsh
 ```
 
 ## Quick Start
@@ -49,39 +57,58 @@ cdl spawn myrepo feature-auth --task "Implement OAuth login"
 cdl spawn myrepo feature-tests --task "Add unit tests"
 
 # 3. Monitor all agents
-cdl status
+cdl status          # or: cdl s
+cdl status --json   # JSON output for scripting
 
 # 4. Launch TUI dashboard
 cdl-ui
 
 # 5. View an agent's terminal
-cdl attach 1
+cdl attach 1        # or: cdl a 1
+cdl attach          # fzf picker if no arg
 
-# 6. Review changes
-cdl diff
+# 6. Follow logs live
+cdl logs -f 1       # like tail -f
 
-# 7. Push changes when ready
+# 7. Review changes
+cdl diff            # or: cdl d
+cdl diff --tool delta  # use external diff tool
+
+# 8. Push changes when ready
 cdl merge 1
 
-# 8. Cleanup
-cdl kill 1 --cleanup
+# 9. Cleanup
+cdl kill 1 --cleanup   # or: cdl k 1 -c
 ```
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `cdl add <url>` | Clone and register a repository |
-| `cdl list` | List all repos and active agents |
-| `cdl spawn <repo> <branch> [options]` | Start a new Claude Code agent |
-| `cdl status` | Show detailed status of all agents |
-| `cdl attach <n>` | Attach to agent's tmux session |
-| `cdl diff [n]` | Show git diff for agent(s) |
-| `cdl logs <n>` | View agent's terminal output |
-| `cdl merge <n>` | Push agent's branch to origin |
-| `cdl kill <n>` | Stop an agent |
-| `cdl killall` | Stop all agents |
-| `cdl-ui` | Launch TUI dashboard |
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `cdl add <url>` | | Clone and register a repository |
+| `cdl list` | | List all repos and active agents |
+| `cdl spawn <repo> <branch>` | | Start a new Claude Code agent |
+| `cdl status` | `s` | Show detailed status of all agents |
+| `cdl attach [n]` | `a` | Attach to agent's tmux session |
+| `cdl diff [n]` | `d` | Show git diff for agent(s) |
+| `cdl logs [n]` | `l` | View agent's terminal output |
+| `cdl merge <n>` | | Push agent's branch to origin |
+| `cdl kill [n]` | `k` | Stop an agent |
+| `cdl killall` | | Stop all agents |
+| `cdl pick` | | Interactive agent picker (for scripting) |
+| `cdl completions <shell>` | | Generate shell completions |
+| `cdl-ui` | | Launch TUI dashboard |
+
+> **Note:** Commands without `[n]` argument will show an interactive picker (requires `fzf` or falls back to numbered menu).
+
+### Common Flags
+
+```bash
+--json, -j          # Output in JSON format (for scripting)
+--follow, -f        # Follow logs (like tail -f)
+--cleanup, -c       # Remove worktree when killing agent
+--tool <name>       # Use external diff tool (delta, difftastic, etc.)
+```
 
 ### Spawn Options
 
@@ -92,6 +119,52 @@ Options:
   -t, --task "..."     Task/prompt for the agent
   -y, --auto-accept    Enable auto-accept mode (no permission prompts)
   -n, --no-auto-accept Run in interactive/print mode (default)
+  -l, --label <name>   Label for grouping agents
+```
+
+## Shell Completions
+
+Enable tab completion for commands, repos, and agents:
+
+```bash
+# Bash (add to ~/.bashrc)
+eval "$(cdl completions bash)"
+
+# Zsh (add to ~/.zshrc)
+eval "$(cdl completions zsh)"
+
+# Fish
+cdl completions fish > ~/.config/fish/completions/cdl.fish
+```
+
+## JSON Output
+
+All list/status commands support JSON output for scripting:
+
+```bash
+# Get list of agents
+cdl status --json | jq '.agents'
+
+# Get repo names
+cdl list --json | jq -r '.repos | keys[]'
+
+# Use with fzf
+cdl status --json | jq -r '.agents[] | "\(.number): \(.repo)/\(.branch)"' | fzf
+```
+
+## Config File
+
+Create `~/.conductor/config.toml` to customize defaults:
+
+```toml
+[defaults]
+auto_accept = false      # Default auto-accept mode
+diff_tool = "delta"      # Default diff tool
+notify = false           # Desktop notifications
+
+[hooks]
+post_spawn = "notify-send 'CDL' 'Agent spawned'"
+post_complete = "~/.local/bin/on-agent-done.sh"
 ```
 
 ## How It Works
@@ -104,6 +177,7 @@ Options:
 ```
 ~/.conductor/
 ├── config.json          # Tracks repos and agents
+├── config.toml          # User preferences (optional)
 ├── repos/
 │   └── myrepo/          # Cloned repositories
 └── worktrees/
@@ -119,24 +193,44 @@ Launch the visual dashboard to monitor all agents in real-time:
 cdl-ui
 ```
 
-```
-┌──────────────────────────────────────┐┌──────────────────────────────────────┐
-│ AGENTS                               ││ myrepo:feature-1 - Add authentication│
-│                                      ││                                      │
-│ ● [1] myrepo:feature-1 ok            ││ I'll help you implement auth...      │
-│ ● [2] myrepo:feature-2 +3            ││                                      │
-│ ● [3] myrepo:bugfix-99 ok            ││ Let me check the existing code...    │
-│                                      ││                                      │
-└──────────────────────────────────────┘└──────────────────────────────────────┘
- q Quit  r Refresh  a Attach  k Kill
-```
+### Features
 
-**Keyboard shortcuts:**
-- `↑/↓` - Select agent
-- `r` - Refresh status
-- `a` - Attach to selected agent's terminal
-- `k` - Kill selected agent
-- `q` - Quit dashboard
+- **Clickable agent cards** - Click to select
+- **Action buttons** - Attach, Logs, Diff, Kill, Refresh
+- **Keyboard shortcuts** - Full keyboard navigation
+- **Live updates** - Auto-refresh every second
+- **Confirmation dialogs** - Safe kill with confirmation
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `1-5` | Select agent by number |
+| `r` | Refresh |
+| `a` | Attach to selected agent |
+| `l` | Show logs |
+| `d` | Show diff |
+| `k` | Kill agent (with confirmation) |
+| `q` / `Esc` | Quit |
+
+### Screenshot
+
+```
+┌─────────────────────────────────┐┌────────────────────────────────────────────┐
+│ AGENTS                          ││ myrepo/feature-1 | LOGS | Add authentication│
+│                                 │├────────────────────────────────────────────┤
+│ ┌─────────────────────────────┐ ││ [Attach] [Logs] [Diff] [Kill] [Refresh]    │
+│ │ 1 myrepo/feature-1 (clean)  │ │├────────────────────────────────────────────┤
+│ │   Add authentication...     │ ││                                            │
+│ └─────────────────────────────┘ ││ I'll help you implement authentication...  │
+│ ┌─────────────────────────────┐ ││                                            │
+│ │ 2 myrepo/feature-2 (+3)     │ ││ Let me check the existing code first...    │
+│ │   Create REST API...        │ ││                                            │
+│ └─────────────────────────────┘ ││ > Reading src/auth/...                     │
+│                                 ││                                            │
+└─────────────────────────────────┘└────────────────────────────────────────────┘
+ q Quit | r Refresh | a Attach | l Logs | d Diff | k Kill
+```
 
 ## Tips
 
@@ -154,10 +248,24 @@ cdl spawn myrepo tests --task "Write tests" -n
 cdl-ui
 ```
 
-### View without attaching
+### Follow logs in real-time
 ```bash
-# See recent output
-cdl logs 1 --lines 100
+cdl logs -f 1  # Like tail -f, updates every 0.5s
+```
+
+### Use with external diff tools
+```bash
+cdl diff --tool delta      # Use delta for syntax highlighting
+cdl diff --tool difftastic # Use difftastic for structural diff
+```
+
+### Scripting with JSON
+```bash
+# Kill all agents with changes
+cdl status --json | jq -r '.agents[] | select(.changes > 0) | .number' | xargs -I{} cdl kill {}
+
+# Get agent count
+cdl status --json | jq '.count'
 ```
 
 ## License

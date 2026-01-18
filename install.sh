@@ -8,6 +8,7 @@ GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
+DIM='\033[2m'
 NC='\033[0m'
 
 echo -e "${CYAN}Installing CDL (Conductor Linux)...${NC}"
@@ -26,7 +27,14 @@ done
 if ! command -v claude &> /dev/null; then
     echo -e "${YELLOW}Warning: 'claude' CLI not found.${NC}"
     echo -e "${YELLOW}CDL requires Claude Code CLI to function.${NC}"
-    echo -e "${YELLOW}Install it from: https://claude.com/claude-code${NC}"
+    echo -e "${YELLOW}Install it from: https://claude.ai/code${NC}"
+fi
+
+# Check for optional fzf
+if command -v fzf &> /dev/null; then
+    echo -e "${DIM}Found fzf - interactive picker enabled${NC}"
+else
+    echo -e "${DIM}Optional: Install 'fzf' for interactive agent picker${NC}"
 fi
 
 if [ ${#missing_deps[@]} -gt 0 ]; then
@@ -66,17 +74,39 @@ fi
 # Detect shell config
 if [ -n "${ZSH_VERSION:-}" ] || [ -f "$HOME/.zshrc" ]; then
     SHELL_RC="$HOME/.zshrc"
-else
+    SHELL_TYPE="zsh"
+elif [ -f "$HOME/.bashrc" ]; then
     SHELL_RC="$HOME/.bashrc"
+    SHELL_TYPE="bash"
+else
+    SHELL_RC="$HOME/.profile"
+    SHELL_TYPE="bash"
 fi
 
-# Add to PATH if not already
+# Add to PATH and completions if not already
 if ! grep -q ".cdl/bin" "$SHELL_RC" 2>/dev/null; then
     {
         echo ''
         echo '# CDL (Conductor Linux)'
         echo 'export PATH="$HOME/.cdl/bin:$PATH"'
+        echo ''
+        echo '# CDL shell completions'
+        if [ "$SHELL_TYPE" = "zsh" ]; then
+            echo 'eval "$(cdl completions zsh)"'
+        else
+            echo 'eval "$(cdl completions bash)"'
+        fi
     } >> "$SHELL_RC"
+fi
+
+# Fish completions (if fish is installed)
+if command -v fish &> /dev/null; then
+    FISH_COMP_DIR="$HOME/.config/fish/completions"
+    if [ -d "$HOME/.config/fish" ]; then
+        mkdir -p "$FISH_COMP_DIR"
+        "$INSTALL_DIR/bin/cdl" completions fish > "$FISH_COMP_DIR/cdl.fish" 2>/dev/null || true
+        echo -e "${DIM}Fish completions installed${NC}"
+    fi
 fi
 
 # Create symlinks if possible
@@ -91,7 +121,12 @@ echo ""
 echo -e "Commands:"
 echo -e "  ${CYAN}cdl add <repo-url>${NC}                  Clone a repository"
 echo -e "  ${CYAN}cdl spawn <repo> <branch> -t \"...\"${NC}  Start an agent"
-echo -e "  ${CYAN}cdl status${NC}                          View all agents"
+echo -e "  ${CYAN}cdl status${NC}  or  ${CYAN}cdl s${NC}               View all agents"
+echo -e "  ${CYAN}cdl status --json${NC}                   JSON output for scripting"
+echo -e "  ${CYAN}cdl attach${NC}  or  ${CYAN}cdl a${NC}               Attach to agent (fzf picker)"
+echo -e "  ${CYAN}cdl logs -f 1${NC}                       Follow logs (like tail -f)"
 echo -e "  ${CYAN}cdl-ui${NC}                              Launch TUI dashboard"
+echo ""
+echo -e "Aliases: ${DIM}s=status, a=attach, l=logs, k=kill, d=diff${NC}"
 echo ""
 echo -e "${YELLOW}Restart your terminal or run:${NC} source $SHELL_RC"
