@@ -1,6 +1,6 @@
 # CDL (Conductor Linux)
 
-A CLI tool to manage multiple [Claude Code](https://claude.ai/code) agents working in parallel on isolated git worktrees.
+A CLI tool to manage multiple AI coding agents ([Claude Code](https://claude.ai/code) and [Codex](https://openai.com/codex/)) working in parallel on isolated git worktrees.
 
 Inspired by [Conductor](https://conductor.build/) for Mac.
 
@@ -12,7 +12,7 @@ curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.
 
 ## Features
 
-- Run multiple Claude Code instances simultaneously
+- Run multiple AI coding agents simultaneously (Claude Code & Codex)
 - Each agent gets an isolated git worktree (no conflicts)
 - Monitor all agents from a single dashboard
 - **TUI Dashboard** - Visual interface with clickable buttons
@@ -28,8 +28,44 @@ curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.
 - Python 3.10+
 - git
 - tmux
-- [Claude Code CLI](https://claude.ai/code) (`claude`)
+- [Claude Code CLI](https://claude.ai/code) (`claude`) and/or [Codex CLI](https://openai.com/codex/) (`codex`)
 - Optional: `fzf` for interactive picker
+
+## Agent Authentication
+
+Both Claude Code and Codex require authentication before use. Credentials are stored locally on your machine.
+
+### Claude Code
+
+```bash
+# Login (opens browser for OAuth or prompts for API key)
+claude login
+
+# Or set API key directly
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Verify
+claude whoami
+```
+
+Credentials stored in: `~/.config/.claude/`
+
+### Codex
+
+```bash
+# Login (opens browser for ChatGPT auth or prompts for API key)
+codex login
+
+# Or set API key directly
+export OPENAI_API_KEY=sk-...
+
+# Verify
+codex --version
+```
+
+Credentials stored in: `~/.codex/`
+
+> **Note:** CDL does not store or manage API keys. Each agent CLI handles its own authentication locally.
 
 ## Manual Installation
 
@@ -117,9 +153,24 @@ cdl spawn <repo> <branch> [options]
 
 Options:
   -t, --task "..."     Task/prompt for the agent
+  -a, --agent <type>   Agent type: claude (default) or codex
   -y, --auto-accept    Enable auto-accept mode (no permission prompts)
   -n, --no-auto-accept Run in interactive/print mode (default)
   -l, --label <name>   Label for grouping agents
+```
+
+### Using Different Agents
+
+```bash
+# Spawn a Claude Code agent (default)
+cdl spawn myrepo feature-auth --task "Implement OAuth login"
+
+# Spawn a Codex agent
+cdl spawn myrepo feature-api --agent codex --task "Create REST API"
+
+# Mix both agents on the same repo
+cdl spawn myrepo auth-claude --task "Add authentication" --agent claude
+cdl spawn myrepo api-codex --task "Build API endpoints" --agent codex
 ```
 
 ## Shell Completions

@@ -12,9 +12,9 @@ from .core.user_config import load_user_config
 from .commands import repo, agent, monitor, sync
 
 
-def check_dependencies() -> list[str]:
+def check_dependencies(agent_type: str = "claude") -> list[str]:
     """Check if required dependencies are installed."""
-    deps = ["git", "tmux", "claude"]
+    deps = ["git", "tmux", agent_type]
     return [dep for dep in deps if not check_command_exists(dep)]
 
 
@@ -31,7 +31,7 @@ def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser."""
     parser = argparse.ArgumentParser(
         prog="cdl",
-        description=c("CDL (Conductor Linux)", Colors.BOLD) + " - Manage multiple Claude Code agents",
+        description=c("CDL (Conductor Linux)", Colors.BOLD) + " - Manage multiple AI coding agents (Claude Code & Codex)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 {c('Examples:', Colors.BOLD)}
@@ -62,10 +62,16 @@ def create_parser() -> argparse.ArgumentParser:
     add_json_flag(p)
 
     # spawn
-    p = subparsers.add_parser("spawn", help="Spawn a new Claude Code agent")
+    p = subparsers.add_parser("spawn", help="Spawn a new AI coding agent")
     p.add_argument("repo", nargs="?", help="Repository name (fzf picker if omitted)")
     p.add_argument("branch", nargs="?", help="Branch to work on")
     p.add_argument("--task", "-t", help="Task/prompt for the agent")
+    p.add_argument(
+        "--agent", "-a",
+        choices=["claude", "codex"],
+        default="claude",
+        help="Agent type: claude (default) or codex",
+    )
     p.add_argument(
         "--auto-accept", "-y",
         action="store_true",
@@ -141,7 +147,8 @@ def main() -> int:
 
     # Check dependencies on first meaningful command
     if args.command in ["spawn", "add"]:
-        missing = check_dependencies()
+        agent_type = getattr(args, 'agent', 'claude')
+        missing = check_dependencies(agent_type)
         if missing:
             print(c(f"Missing dependencies: {', '.join(missing)}", Colors.RED))
             print("Please install them first.")

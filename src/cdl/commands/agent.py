@@ -13,12 +13,55 @@ from ..utils.colors import Colors, c
 from .repo import get_active_agents
 
 
+def _build_claude_command(task: str, auto_accept: bool) -> list[str]:
+    """Build the Claude Code CLI command."""
+    if task:
+        if auto_accept:
+            return [
+                "bash", "-c",
+                f'claude --dangerously-skip-permissions "{task}"; '
+                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
+                "read; exec bash"
+            ]
+        else:
+            return [
+                "bash", "-c",
+                f'claude -p "{task}"; '
+                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
+                "read; exec bash"
+            ]
+    return ["claude"]
+
+
+def _build_codex_command(task: str, auto_accept: bool) -> list[str]:
+    """Build the Codex CLI command."""
+    if task:
+        # Codex uses --full-auto for autonomous mode, or -a for approval policy
+        # --full-auto = -a on-request --sandbox workspace-write
+        if auto_accept:
+            return [
+                "bash", "-c",
+                f'codex --full-auto "{task}"; '
+                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
+                "read; exec bash"
+            ]
+        else:
+            return [
+                "bash", "-c",
+                f'codex "{task}"; '
+                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
+                "read; exec bash"
+            ]
+    return ["codex"]
+
+
 def cmd_spawn(args) -> None:
-    """Spawn a new Claude Code agent on a worktree."""
+    """Spawn a new AI coding agent on a worktree."""
     repo_name = args.repo
     branch_name = args.branch
     task = args.task or ""
     auto_accept = args.auto_accept
+    agent_type = getattr(args, 'agent', 'claude')
 
     config = load_config()
 
@@ -48,38 +91,26 @@ def cmd_spawn(args) -> None:
             print(c(f"Failed to create worktree: {result.stderr}", Colors.RED))
             return
 
-    # Create tmux session for Claude Code
+    # Create tmux session for the agent
     session_name = f"conductor-{worktree_name}"
 
     # Ask about auto-accept mode if task provided and not already set via flag
     if task and auto_accept is None:
-        print(c("\nAuto-accept mode allows Claude to run without permission prompts.", Colors.YELLOW))
+        agent_name = "Claude" if agent_type == "claude" else "Codex"
+        print(c(f"\nAuto-accept mode allows {agent_name} to run without permission prompts.", Colors.YELLOW))
         print(c("WARNING: This gives the agent full control to modify files and run commands.", Colors.RED))
         response = input(c("Enable auto-accept mode? [y/N]: ", Colors.BOLD)).strip().lower()
         auto_accept = response in ("y", "yes")
 
-    # Build claude command - wrap in bash to keep session alive
-    if task:
-        # Use bash -c with properly escaped task
-        if auto_accept:
-            claude_cmd = [
-                "bash", "-c",
-                f'claude --dangerously-skip-permissions "{task}"; '
-                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
-                "read; exec bash"
-            ]
-        else:
-            claude_cmd = [
-                "bash", "-c",
-                f'claude -p "{task}"; '
-                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
-                "read; exec bash"
-            ]
+    # Build agent command - wrap in bash to keep session alive
+    if agent_type == "codex":
+        agent_cmd = _build_codex_command(task, auto_accept)
     else:
-        claude_cmd = ["claude"]
+        agent_cmd = _build_claude_command(task, auto_accept)
 
-    print(c("Spawning Claude Code agent...", Colors.CYAN))
-    tmux.new_session(session_name, worktree_path, claude_cmd)
+    agent_label = "Codex" if agent_type == "codex" else "Claude Code"
+    print(c(f"Spawning {agent_label} agent...", Colors.CYAN))
+    tmux.new_session(session_name, worktree_path, agent_cmd)
 
     # Track the agent
     config["agents"][session_name] = {
@@ -87,6 +118,7 @@ def cmd_spawn(args) -> None:
         "branch": branch_name,
         "worktree": str(worktree_path),
         "task": task,
+        "agent_type": agent_type,
         "started": datetime.now().isoformat(),
     }
     save_config(config)

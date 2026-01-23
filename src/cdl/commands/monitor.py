@@ -34,6 +34,7 @@ def cmd_status(args) -> None:
                     "worktree": a["worktree"],
                     "task": a.get("task", ""),
                     "label": a.get("label", ""),
+                    "agent_type": a.get("agent_type", "claude"),
                     "started": a.get("started", ""),
                 }
                 for i, a in enumerate(agents, 1)
@@ -65,9 +66,12 @@ def cmd_status(args) -> None:
         except Exception:
             commits_ahead = 0
 
+        agent_type = agent.get("agent_type", "claude")
+        type_color = Colors.MAGENTA if agent_type == "codex" else Colors.CYAN
+        type_label = "Codex" if agent_type == "codex" else "Claude"
         status_icon = c("*", Colors.GREEN)
 
-        print(f"\n  {status_icon} {c(f'Agent #{i}', Colors.BOLD)}")
+        print(f"\n  {status_icon} {c(f'Agent #{i}', Colors.BOLD)} [{c(type_label, type_color)}]")
         print(f"    - Repo:      {c(agent['repo'], Colors.CYAN)}")
         print(f"    - Branch:    {c(agent['branch'], Colors.YELLOW)}")
         print(f"    - Workspace: {agent['worktree']}")
