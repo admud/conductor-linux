@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +48,21 @@ def save_config(config: dict[str, Any]) -> bool:
     """
     try:
         init_dirs()
-        CONFIG_FILE.write_text(json.dumps(config, indent=2))
+        config_text = json.dumps(config, indent=2)
+        config_dir = CONFIG_FILE.parent
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=config_dir,
+            delete=False,
+            encoding="utf-8",
+        ) as temp_file:
+            temp_file.write(config_text)
+            temp_path = Path(temp_file.name)
+        os.replace(temp_path, CONFIG_FILE)
+        try:
+            os.chmod(CONFIG_FILE, 0o600)
+        except OSError:
+            pass
         return True
     except OSError:
         return False

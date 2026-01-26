@@ -10,26 +10,22 @@ from ..core import git, tmux
 from ..core.config import load_config, save_config
 from ..core.paths import WORKTREES_DIR
 from ..utils.colors import Colors, c
+from ..utils.fzf import pick_repo
 from .repo import get_active_agents
 
 
 def _build_claude_command(task: str, auto_accept: bool) -> list[str]:
     """Build the Claude Code CLI command."""
     if task:
-        if auto_accept:
-            return [
-                "bash", "-c",
-                f'claude --dangerously-skip-permissions "{task}"; '
-                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
-                "read; exec bash"
-            ]
-        else:
-            return [
-                "bash", "-c",
-                f'claude -p "{task}"; '
-                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
-                "read; exec bash"
-            ]
+        runner = "claude --dangerously-skip-permissions" if auto_accept else "claude -p"
+        return [
+            "bash", "-lc",
+            f'{runner} "$1"; '
+            'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
+            "read; exec bash",
+            "--",
+            task,
+        ]
     return ["claude"]
 
 
@@ -38,20 +34,15 @@ def _build_codex_command(task: str, auto_accept: bool) -> list[str]:
     if task:
         # Codex uses --full-auto for autonomous mode, or -a for approval policy
         # --full-auto = -a on-request --sandbox workspace-write
-        if auto_accept:
-            return [
-                "bash", "-c",
-                f'codex --full-auto "{task}"; '
-                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
-                "read; exec bash"
-            ]
-        else:
-            return [
-                "bash", "-c",
-                f'codex "{task}"; '
-                'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
-                "read; exec bash"
-            ]
+        runner = "codex --full-auto" if auto_accept else "codex"
+        return [
+            "bash", "-lc",
+            f'{runner} "$1"; '
+            'echo "\\n[Agent finished. Press Enter for shell or Ctrl+D to exit]"; '
+            "read; exec bash",
+            "--",
+            task,
+        ]
     return ["codex"]
 
 
@@ -65,11 +56,23 @@ def cmd_spawn(args) -> None:
 
     config = load_config()
 
+    if not repo_name:
+        repo_name = pick_repo(config.get("repos", {}), "Select repository: ")
+        if not repo_name:
+            print(c("No repository selected.", Colors.YELLOW))
+            return
+
     if repo_name not in config["repos"]:
         print(c(f"Repository '{repo_name}' not found. Use 'cdl add' first.", Colors.RED))
         return
 
     repo_path = Path(config["repos"][repo_name]["path"])
+    if not branch_name:
+        default_branch = git.get_current_branch(repo_path) or "main"
+        prompt = c(f"Branch name [{default_branch}]: ", Colors.BOLD)
+        response = input(prompt).strip()
+        branch_name = response or default_branch
+
     timestamp = datetime.now().strftime("%H%M%S")
     worktree_name = f"{repo_name}-{branch_name}-{timestamp}"
     worktree_path = WORKTREES_DIR / worktree_name
