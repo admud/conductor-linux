@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.
 - **fzf integration** - Interactive agent picker
 - **Config file** - Customize defaults
 - View diffs and changes across all agents
-- Merge changes back when ready
+- Push agent branches back when ready
 
 ## Requirements
 
@@ -158,6 +158,8 @@ Options:
   -n, --no-auto-accept Run in interactive/print mode (default)
   -l, --label <name>   Label for grouping agents
 ```
+
+> **Tip:** If you omit `<repo>` or `<branch>`, CDL will prompt you to select a repo and enter a branch name (defaults to the current branch).
 
 ### Using Different Agents
 
