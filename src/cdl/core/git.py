@@ -14,6 +14,14 @@ def clone(url: str, dest: Path) -> subprocess.CompletedProcess:
     return run(["git", "clone", url, str(dest)])
 
 
+def run_raw(
+    args: list[str],
+    cwd: Optional[Union[str, Path]] = None,
+) -> subprocess.CompletedProcess:
+    """Run a raw command using the shared process runner."""
+    return run(args, cwd=cwd)
+
+
 def worktree_add(
     repo_path: Path,
     worktree_path: Path,

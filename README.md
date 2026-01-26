@@ -29,6 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.
 - git
 - tmux
 - [Claude Code CLI](https://claude.ai/code) (`claude`) and/or [Codex CLI](https://openai.com/codex/) (`codex`)
+- Optional: [GitHub CLI](https://cli.github.com/) (`gh`) for PR workflow
 - Optional: `fzf` for interactive picker
 
 ## Agent Authentication
@@ -113,6 +114,9 @@ cdl diff --tool delta  # use external diff tool
 # 8. Push changes when ready
 cdl merge 1
 
+# 8b. Create a PR
+cdl pr create 1 --fill
+
 # 9. Cleanup
 cdl kill 1 --cleanup   # or: cdl k 1 -c
 ```
@@ -133,6 +137,7 @@ cdl kill 1 --cleanup   # or: cdl k 1 -c
 | `cdl killall` | | Stop all agents |
 | `cdl pick` | | Interactive agent picker (for scripting) |
 | `cdl completions <shell>` | | Generate shell completions |
+| `cdl pr <create|view|merge>` | | Create/view/merge GitHub PRs for agent branches |
 | `cdl-ui` | | Launch TUI dashboard |
 
 > **Note:** Commands without `[n]` argument will show an interactive picker (requires `fzf` or falls back to numbered menu).
@@ -144,6 +149,23 @@ cdl kill 1 --cleanup   # or: cdl k 1 -c
 --follow, -f        # Follow logs (like tail -f)
 --cleanup, -c       # Remove worktree when killing agent
 --tool <name>       # Use external diff tool (delta, difftastic, etc.)
+```
+
+### PR Workflow
+
+```bash
+# Create a PR for an agent branch (auto-fill from commits)
+cdl pr create 1 --fill
+
+# Create as draft, target a base branch, and open in browser
+cdl pr create 1 --base main --draft --web
+
+# View PR details or open in browser
+cdl pr view 1
+cdl pr view 1 --web
+
+# Merge a PR (squash by default if you pass --squash)
+cdl pr merge 1 --squash --delete-branch
 ```
 
 ### Spawn Options

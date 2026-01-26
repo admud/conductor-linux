@@ -26,7 +26,7 @@ _cdl_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="add list spawn status attach diff merge logs kill killall pick completions s a l k d"
+    commands="add list spawn status attach diff merge logs kill killall pick completions pr s a l k d"
 
     case "${prev}" in
         cdl)
@@ -53,6 +53,10 @@ _cdl_completions() {
             COMPREPLY=( $(compgen -W "bash zsh fish" -- ${cur}) )
             return 0
             ;;
+        pr)
+            COMPREPLY=( $(compgen -W "create view merge" -- ${cur}) )
+            return 0
+            ;;
         --tool)
             COMPREPLY=( $(compgen -W "delta difftastic diff-so-fancy" -- ${cur}) )
             return 0
@@ -62,7 +66,7 @@ _cdl_completions() {
     # Complete flags
     case "${cur}" in
         -*)
-            local flags="-h --help -t --task -y --auto-accept -n --no-auto-accept -c --cleanup -f --follow --json -j"
+            local flags="-h --help -t --task -y --auto-accept -n --no-auto-accept -c --cleanup -f --follow --json -j --base --title --body --fill --draft --web --merge --squash --rebase --delete-branch --auto"
             COMPREPLY=( $(compgen -W "${flags}" -- ${cur}) )
             return 0
             ;;
@@ -99,6 +103,7 @@ _cdl() {
         'killall:Kill all agents'
         'pick:Interactive agent picker'
         'completions:Generate shell completions'
+        'pr:Pull request workflow'
     )
 
     _arguments -C \\
@@ -123,6 +128,11 @@ _cdl() {
                     ;;
                 completions)
                     _values 'shell' bash zsh fish
+                    ;;
+                pr)
+                    if (( CURRENT == 3 )); then
+                        _values 'pr subcommand' create view merge
+                    fi
                     ;;
             esac
             ;;
@@ -154,6 +164,7 @@ complete -c cdl -n "__fish_use_subcommand" -a "kill k" -d "Kill an agent"
 complete -c cdl -n "__fish_use_subcommand" -a "killall" -d "Kill all agents"
 complete -c cdl -n "__fish_use_subcommand" -a "pick" -d "Interactive agent picker"
 complete -c cdl -n "__fish_use_subcommand" -a "completions" -d "Generate shell completions"
+complete -c cdl -n "__fish_use_subcommand" -a "pr" -d "Pull request workflow"
 
 # Completions subcommand
 complete -c cdl -n "__fish_seen_subcommand_from completions" -a "bash zsh fish"
@@ -176,4 +187,19 @@ complete -c cdl -n "__fish_seen_subcommand_from kill k killall" -s c -l cleanup 
 
 # diff flags
 complete -c cdl -n "__fish_seen_subcommand_from diff d" -l tool -d "Diff tool to use"
+
+# pr flags
+complete -c cdl -n "__fish_seen_subcommand_from pr" -a "create view merge"
+complete -c cdl -n "__fish_seen_subcommand_from pr create" -l base -d "Base branch"
+complete -c cdl -n "__fish_seen_subcommand_from pr create" -l title -d "PR title"
+complete -c cdl -n "__fish_seen_subcommand_from pr create" -l body -d "PR body"
+complete -c cdl -n "__fish_seen_subcommand_from pr create" -l fill -d "Auto-fill title/body"
+complete -c cdl -n "__fish_seen_subcommand_from pr create" -l draft -d "Create as draft"
+complete -c cdl -n "__fish_seen_subcommand_from pr create" -l web -d "Open PR in browser"
+complete -c cdl -n "__fish_seen_subcommand_from pr view" -l web -d "Open PR in browser"
+complete -c cdl -n "__fish_seen_subcommand_from pr merge" -l merge -d "Merge commit"
+complete -c cdl -n "__fish_seen_subcommand_from pr merge" -l squash -d "Squash and merge"
+complete -c cdl -n "__fish_seen_subcommand_from pr merge" -l rebase -d "Rebase and merge"
+complete -c cdl -n "__fish_seen_subcommand_from pr merge" -l delete-branch -d "Delete branch after merge"
+complete -c cdl -n "__fish_seen_subcommand_from pr merge" -l auto -d "Enable auto-merge"
 '''

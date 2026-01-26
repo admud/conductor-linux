@@ -9,7 +9,7 @@ from .utils.colors import Colors, c
 from .utils.process import check_command_exists
 from .core.config import init_config
 from .core.user_config import load_user_config
-from .commands import repo, agent, monitor, sync
+from .commands import repo, agent, monitor, sync, pr
 
 
 def check_dependencies(agent_type: str = "claude") -> list[str]:
@@ -130,6 +130,31 @@ def create_parser() -> argparse.ArgumentParser:
     p = subparsers.add_parser("completions", help="Generate shell completions")
     p.add_argument("shell", choices=["bash", "zsh", "fish"], help="Shell type")
 
+    # pr
+    p = subparsers.add_parser("pr", help="GitHub pull request workflow")
+    pr_sub = p.add_subparsers(dest="pr_command", help="PR commands")
+
+    pr_create = pr_sub.add_parser("create", help="Create a PR for an agent branch")
+    pr_create.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
+    pr_create.add_argument("--base", help="Base branch (default: repo default)")
+    pr_create.add_argument("--title", help="PR title")
+    pr_create.add_argument("--body", help="PR body")
+    pr_create.add_argument("--fill", action="store_true", help="Auto-fill title/body from commits")
+    pr_create.add_argument("--draft", action="store_true", help="Create as draft PR")
+    pr_create.add_argument("--web", action="store_true", help="Open PR in browser")
+
+    pr_view = pr_sub.add_parser("view", help="View a PR for an agent branch")
+    pr_view.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
+    pr_view.add_argument("--web", action="store_true", help="Open PR in browser")
+
+    pr_merge = pr_sub.add_parser("merge", help="Merge a PR for an agent branch")
+    pr_merge.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
+    pr_merge.add_argument("--merge", action="store_true", help="Use a merge commit")
+    pr_merge.add_argument("--squash", action="store_true", help="Squash and merge")
+    pr_merge.add_argument("--rebase", action="store_true", help="Rebase and merge")
+    pr_merge.add_argument("--delete-branch", action="store_true", help="Delete branch after merge")
+    pr_merge.add_argument("--auto", action="store_true", help="Enable auto-merge when checks pass")
+
     return parser
 
 
@@ -176,6 +201,7 @@ def main() -> int:
         "killall": agent.cmd_killall,
         "pick": monitor.cmd_pick,
         "completions": cmd_completions,
+        "pr": cmd_pr,
     }
 
     if command in commands:
@@ -191,6 +217,21 @@ def cmd_completions(args) -> int:
     from .utils.completions import generate_completions
     print(generate_completions(args.shell))
     return 0
+
+
+def cmd_pr(args) -> int:
+    """Dispatch PR subcommands."""
+    if args.pr_command == "create":
+        pr.cmd_pr_create(args)
+        return 0
+    if args.pr_command == "view":
+        pr.cmd_pr_view(args)
+        return 0
+    if args.pr_command == "merge":
+        pr.cmd_pr_merge(args)
+        return 0
+    print("Usage: cdl pr <create|view> [options]")
+    return 1
 
 
 if __name__ == "__main__":
