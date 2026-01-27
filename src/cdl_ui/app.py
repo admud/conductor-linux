@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -26,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from cdl.core.config import load_config, save_config
 from cdl.core import git, tmux
+from cdl.core.paths import WORKTREES_DIR
+from cdl.commands.agent import _ensure_context_dir
 
 
 def get_active_agents() -> list[dict]:
@@ -52,6 +55,24 @@ def get_active_agents() -> list[dict]:
                 "changes": changes,
             })
     return agents
+
+
+def get_archived_workspaces() -> list[dict]:
+    """Get list of archived workspaces from config."""
+    config = load_config()
+    archives = []
+    for key, entry in config.get("archives", {}).items():
+        archives.append({
+            "key": key,
+            "repo": entry.get("repo", ""),
+            "branch": entry.get("branch", ""),
+            "worktree": entry.get("worktree", ""),
+            "archived_at": entry.get("archived_at", ""),
+            "task": entry.get("task", ""),
+            "agent_type": entry.get("agent_type", "claude"),
+            "started": entry.get("started", ""),
+        })
+    return archives
 
 
 class ConfirmDialog(ModalScreen):
@@ -106,6 +127,37 @@ class AgentCard(Static):
         self.post_message(self.Selected(self.agent, self.index))
 
 
+class ArchiveCard(Static):
+    """A clickable card representing an archived workspace."""
+
+    class Selected(Message):
+        """Message sent when archive is selected."""
+        def __init__(self, archive: dict, index: int):
+            super().__init__()
+            self.archive = archive
+            self.index = index
+
+    def __init__(self, archive: dict, index: int):
+        super().__init__()
+        self.archive = archive
+        self.index = index
+
+    def compose(self) -> ComposeResult:
+        archived_at = self.archive.get("archived_at", "")
+        label = archived_at.split("T")[0] if archived_at else "archived"
+        yield Static(
+            f"[bold blue]{self.index}[/] "
+            f"[cyan]{self.archive['repo']}[/]/[yellow]{self.archive['branch']}[/] "
+            f"[dim]({label})[/]",
+            classes="archive-title"
+        )
+        if self.archive.get("task"):
+            yield Static(f"[dim]{self.archive['task'][:50]}...[/]", classes="archive-task")
+
+    def on_click(self) -> None:
+        self.post_message(self.Selected(self.archive, self.index))
+
+
 class ActionBar(Horizontal):
     """Action buttons for the selected agent."""
 
@@ -113,6 +165,9 @@ class ActionBar(Horizontal):
         yield Button("Attach", id="btn-attach", variant="primary")
         yield Button("Logs", id="btn-logs", variant="default")
         yield Button("Diff", id="btn-diff", variant="default")
+        yield Button("Context", id="btn-context", variant="default")
+        yield Button("Archive", id="btn-archive", variant="warning")
+        yield Button("Restore", id="btn-restore", variant="success")
         yield Button("Kill", id="btn-kill", variant="error")
         yield Button("Refresh", id="btn-refresh", variant="success")
 
@@ -141,6 +196,21 @@ class ConductorUI(App):
     }
 
     #agents-container {
+        height: 2fr;
+        overflow-y: auto;
+    }
+
+    #archives-header {
+        margin-top: 1;
+        text-align: center;
+        text-style: bold;
+        padding: 1 0;
+        color: $text;
+        background: $surface;
+        border-top: solid $surface-lighten-1;
+    }
+
+    #archives-container {
         height: 1fr;
         overflow-y: auto;
     }
@@ -167,6 +237,14 @@ class ConductorUI(App):
     }
 
     .agent-task {
+        margin-top: 1;
+    }
+
+    .archive-title {
+        text-style: bold;
+    }
+
+    .archive-task {
         margin-top: 1;
     }
 
@@ -256,6 +334,9 @@ class ConductorUI(App):
         Binding("l", "show_logs", "Logs"),
         Binding("d", "show_diff", "Diff"),
         Binding("k", "kill_agent", "Kill"),
+        Binding("x", "archive_agent", "Archive"),
+        Binding("v", "restore_archive", "Restore"),
+        Binding("c", "show_context", "Context"),
         Binding("escape", "quit", "Quit"),
         Binding("1", "select_1", "Agent 1", show=False),
         Binding("2", "select_2", "Agent 2", show=False),
@@ -265,7 +346,8 @@ class ConductorUI(App):
     ]
 
     selected_agent: reactive[dict | None] = reactive(None)
-    view_mode: reactive[str] = reactive("logs")  # "logs" or "diff"
+    selected_archive: reactive[dict | None] = reactive(None)
+    view_mode: reactive[str] = reactive("logs")  # "logs" | "diff" | "context"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -273,6 +355,8 @@ class ConductorUI(App):
             with Vertical(id="sidebar"):
                 yield Static("AGENTS", id="sidebar-header")
                 yield ScrollableContainer(id="agents-container")
+                yield Static("ARCHIVES", id="archives-header")
+                yield ScrollableContainer(id="archives-container")
             with Vertical(id="main"):
                 yield Static("[b]Select an agent to view details[/]", id="main-header")
                 yield ActionBar()
@@ -281,8 +365,11 @@ class ConductorUI(App):
 
     def on_mount(self) -> None:
         self._agents: list[dict] = []
+        self._archives: list[dict] = []
         self.refresh_agents()
+        self.refresh_archives()
         self.set_interval(2, self.refresh_agents)
+        self.set_interval(3, self.refresh_archives)
         self.set_interval(1, self.refresh_view)
 
     def refresh_agents(self) -> None:
@@ -304,9 +391,36 @@ class ConductorUI(App):
 
         self.sub_title = f"{len(self._agents)} agent(s)"
 
+    def refresh_archives(self) -> None:
+        self._archives = get_archived_workspaces()
+        container = self.query_one("#archives-container", ScrollableContainer)
+        container.remove_children()
+
+        if not self._archives:
+            container.mount(Static(
+                "[dim]No archives[/]",
+                classes="empty-state"
+            ))
+        else:
+            for i, archive in enumerate(self._archives, 1):
+                container.mount(ArchiveCard(archive, i))
+
     def refresh_view(self) -> None:
         """Refresh the current view (logs or diff)."""
-        if not self.selected_agent:
+        if not self.selected_agent and not self.selected_archive:
+            return
+
+        if self.selected_agent:
+            if self.view_mode == "logs":
+                self._show_logs()
+            elif self.view_mode == "diff":
+                self._show_diff()
+            else:
+                self._show_context()
+            return
+
+        if self.selected_archive:
+            self._show_archive_details()
             return
 
         if self.view_mode == "logs":
@@ -359,8 +473,75 @@ class ConductorUI(App):
             for f in untracked:
                 log_view.write(f"  + {f}")
 
+    def _show_context(self) -> None:
+        """Display .context contents for selected agent."""
+        if not self.selected_agent:
+            return
+
+        worktree = Path(self.selected_agent["worktree"])
+        context_dir = worktree / ".context"
+        log_view = self.query_one("#log-view", RichLog)
+        log_view.clear()
+
+        if not context_dir.exists():
+            log_view.write("[dim].context directory not found.[/]")
+            return
+
+        files = sorted([p for p in context_dir.rglob("*") if p.is_file()])
+        if not files:
+            log_view.write("[dim].context is empty.[/]")
+            return
+
+        log_view.write("[bold cyan].context files[/]")
+        log_view.write("-" * 40)
+
+        for path in files[:5]:
+            rel = path.relative_to(worktree)
+            log_view.write(f"[yellow]{rel}[/]")
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                log_view.write("[dim]<unreadable>[/]\n")
+                continue
+            lines = text.splitlines()
+            preview = lines[:40]
+            for line in preview:
+                log_view.write(f"  {line}")
+            if len(lines) > 40:
+                log_view.write("  [dim]...[/]")
+            log_view.write("")
+
+    def _show_archive_details(self) -> None:
+        """Display details for selected archive."""
+        if not self.selected_archive:
+            return
+
+        log_view = self.query_one("#log-view", RichLog)
+        log_view.clear()
+        archive = self.selected_archive
+        log_view.write("[bold cyan]Archived workspace[/]")
+        log_view.write("-" * 40)
+        log_view.write(f"Repo:   {archive.get('repo', '')}")
+        log_view.write(f"Branch: {archive.get('branch', '')}")
+        log_view.write(f"Path:   {archive.get('worktree', '')}")
+        log_view.write(f"Saved:  {archive.get('archived_at', '')}")
+        if archive.get("task"):
+            log_view.write("")
+            log_view.write("[bold]Task[/]")
+            log_view.write(archive.get("task", ""))
+        log_view.write("")
+        log_view.write("[dim]Press Restore to bring this workspace back.[/]")
+
     def on_agent_card_selected(self, event: AgentCard.Selected) -> None:
         self.selected_agent = event.agent
+        self.selected_archive = None
+        self._update_header()
+        self.view_mode = "logs"
+        self.refresh_view()
+
+    def on_archive_card_selected(self, event: ArchiveCard.Selected) -> None:
+        self.selected_archive = event.archive
+        self.selected_agent = None
         self._update_header()
         self.view_mode = "logs"
         self.refresh_view()
@@ -369,11 +550,23 @@ class ConductorUI(App):
         header = self.query_one("#main-header", Static)
         if self.selected_agent:
             task = self.selected_agent.get("task", "No task")[:50]
-            mode = "[cyan]LOGS[/]" if self.view_mode == "logs" else "[yellow]DIFF[/]"
+            if self.view_mode == "logs":
+                mode = "[cyan]LOGS[/]"
+            elif self.view_mode == "diff":
+                mode = "[yellow]DIFF[/]"
+            else:
+                mode = "[blue]CONTEXT[/]"
             header.update(
                 f"[bold]{self.selected_agent['repo']}[/]/"
                 f"[yellow]{self.selected_agent['branch']}[/] "
                 f"| {mode} | {task}"
+            )
+        elif self.selected_archive:
+            archived_at = self.selected_archive.get("archived_at", "")
+            header.update(
+                f"[bold]{self.selected_archive['repo']}[/]/"
+                f"[yellow]{self.selected_archive['branch']}[/] "
+                f"| [blue]ARCHIVE[/] | {archived_at}"
             )
         else:
             header.update("[b]Select an agent to view details[/]")
@@ -383,6 +576,7 @@ class ConductorUI(App):
 
         if button_id == "btn-refresh":
             self.refresh_agents()
+            self.refresh_archives()
             self.refresh_view()
         elif button_id == "btn-attach":
             self.action_attach()
@@ -390,11 +584,18 @@ class ConductorUI(App):
             self.action_show_logs()
         elif button_id == "btn-diff":
             self.action_show_diff()
+        elif button_id == "btn-context":
+            self.action_show_context()
+        elif button_id == "btn-archive":
+            self.action_archive_agent()
+        elif button_id == "btn-restore":
+            self.action_restore_archive()
         elif button_id == "btn-kill":
             self.action_kill_agent()
 
     def action_refresh(self) -> None:
         self.refresh_agents()
+        self.refresh_archives()
         self.refresh_view()
 
     def action_attach(self) -> None:
@@ -409,6 +610,11 @@ class ConductorUI(App):
 
     def action_show_diff(self) -> None:
         self.view_mode = "diff"
+        self._update_header()
+        self.refresh_view()
+
+    def action_show_context(self) -> None:
+        self.view_mode = "context"
         self._update_header()
         self.refresh_view()
 
@@ -436,6 +642,100 @@ class ConductorUI(App):
             ),
             confirm_kill
         )
+
+    def action_archive_agent(self) -> None:
+        if not self.selected_agent:
+            return
+
+        async def confirm_archive(confirmed: bool) -> None:
+            if confirmed and self.selected_agent:
+                session = self.selected_agent["session"]
+                config = load_config()
+                agent_info = config.get("agents", {}).get(session)
+                if not agent_info:
+                    return
+                tmux.kill_session(session)
+                repo_path = Path(config["repos"][agent_info["repo"]]["path"])
+                worktree_path = Path(agent_info["worktree"])
+                git.worktree_remove(repo_path, worktree_path, force=True)
+                archive_entry = {
+                    "repo": agent_info["repo"],
+                    "branch": agent_info["branch"],
+                    "worktree": str(worktree_path),
+                    "task": agent_info.get("task", ""),
+                    "agent_type": agent_info.get("agent_type", "claude"),
+                    "started": agent_info.get("started", ""),
+                    "archived_at": datetime.now().isoformat(),
+                }
+                config.setdefault("archives", {})
+                config["archives"][session] = archive_entry
+                del config["agents"][session]
+                save_config(config)
+                self.selected_agent = None
+                self.refresh_agents()
+                self.refresh_archives()
+                self._update_header()
+                log_view = self.query_one("#log-view", RichLog)
+                log_view.clear()
+                log_view.write("[bold yellow]Workspace archived.[/]")
+
+        self.push_screen(
+            ConfirmDialog(
+                f"Archive {self.selected_agent['repo']}/{self.selected_agent['branch']}? "
+                "This removes the worktree."
+            ),
+            confirm_archive
+        )
+
+    def action_restore_archive(self) -> None:
+        if not self.selected_archive:
+            return
+
+        archive = self.selected_archive
+        config = load_config()
+        repo_name = archive.get("repo")
+        if repo_name not in config.get("repos", {}):
+            return
+
+        repo_path = Path(config["repos"][repo_name]["path"])
+        branch = archive.get("branch")
+        worktree_path = Path(archive.get("worktree", ""))
+
+        if not worktree_path.exists():
+            if not worktree_path.parent.exists():
+                worktree_path = WORKTREES_DIR / worktree_path.name
+            result = git.worktree_add(repo_path, worktree_path, branch)
+            if result.returncode != 0:
+                result = git.worktree_add(repo_path, worktree_path, branch, force_branch=True)
+                if result.returncode != 0:
+                    log_view = self.query_one("#log-view", RichLog)
+                    log_view.clear()
+                    log_view.write("[bold red]Restore failed.[/]")
+                    return
+
+        _ensure_context_dir(worktree_path)
+        session_name = f"conductor-{worktree_path.name}"
+        if not tmux.session_exists(session_name):
+            tmux.new_session(session_name, worktree_path)
+
+        config["agents"][session_name] = {
+            "repo": repo_name,
+            "branch": branch,
+            "worktree": str(worktree_path),
+            "task": archive.get("task", ""),
+            "agent_type": archive.get("agent_type", "claude"),
+            "started": archive.get("started", ""),
+        }
+        del config["archives"][archive["key"]]
+        save_config(config)
+
+        self.selected_archive = None
+        self.refresh_archives()
+        self.refresh_agents()
+        self._update_header()
+        log_view = self.query_one("#log-view", RichLog)
+        log_view.clear()
+        log_view.write("[bold green]Workspace restored.[/]")
 
     def _select_agent(self, num: int) -> None:
         if 0 < num <= len(self._agents):
