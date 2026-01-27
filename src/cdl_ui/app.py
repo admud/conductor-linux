@@ -191,6 +191,7 @@ class ActionBar(Horizontal):
     """Action buttons for the selected agent."""
 
     def compose(self) -> ComposeResult:
+        yield Button("Spawn PR", id="btn-spawn-pr", variant="success")
         yield Button("Attach", id="btn-attach", variant="primary")
         yield Button("Logs", id="btn-logs", variant="default")
         yield Button("Diff", id="btn-diff", variant="default")
@@ -616,6 +617,8 @@ class ConductorUI(App):
             self.action_show_diff()
         elif button_id == "btn-context":
             self.action_show_context()
+        elif button_id == "btn-spawn-pr":
+            self.action_spawn_pr()
         elif button_id == "btn-archive":
             self.action_archive_agent()
         elif button_id == "btn-restore":
