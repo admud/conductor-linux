@@ -884,6 +884,13 @@ class ConductorUI(App):
                 tmux.kill_session(session)
                 repo_path = Path(config["repos"][agent_info["repo"]]["path"])
                 worktree_path = Path(agent_info["worktree"])
+                notes_path = worktree_path / ".context" / "notes.md"
+                notes_text = ""
+                if notes_path.exists():
+                    try:
+                        notes_text = notes_path.read_text(encoding="utf-8")
+                    except OSError:
+                        notes_text = ""
                 result = git.worktree_remove(repo_path, worktree_path, force=True)
                 if result.returncode != 0:
                     log_view = self.query_one("#log-view", RichLog)
@@ -899,6 +906,7 @@ class ConductorUI(App):
                     "task": agent_info.get("task", ""),
                     "agent_type": agent_info.get("agent_type", "claude"),
                     "started": agent_info.get("started", ""),
+                    "notes": notes_text,
                     "archived_at": datetime.now().isoformat(),
                 }
                 config.setdefault("archives", {})
@@ -954,6 +962,13 @@ class ConductorUI(App):
                         return
 
             _ensure_context_dir(worktree_path)
+            notes_text = archive.get("notes", "")
+            if notes_text:
+                notes_path = worktree_path / ".context" / "notes.md"
+                try:
+                    notes_path.write_text(notes_text, encoding="utf-8")
+                except OSError:
+                    pass
             session_name = f"conductor-{worktree_path.name}"
             if not tmux.session_exists(session_name):
                 tmux.new_session(session_name, worktree_path)
