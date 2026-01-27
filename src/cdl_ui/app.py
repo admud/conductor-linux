@@ -123,6 +123,26 @@ class SpawnPRDialog(ModalScreen):
         else:
             self.dismiss(None)
 
+
+class RestoreOptionsDialog(ModalScreen):
+    """Modal dialog to restore an archived workspace."""
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Label("Restore workspace", id="dialog-message")
+            yield Label("Options: [recreate]", id="restore-hint")
+            yield Input(placeholder="Type 'recreate' to force recreate", id="restore-input")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Restore", id="restore", variant="primary")
+                yield Button("Cancel", id="cancel", variant="default")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "restore":
+            value = self.query_one("#restore-input", Input).value.strip().lower()
+            self.dismiss({"recreate": value == "recreate"})
+        else:
+            self.dismiss(None)
+
 class AgentCard(Static):
     """A clickable card representing an agent."""
 
@@ -238,6 +258,11 @@ class ConductorUI(App):
         color: $text;
         background: $surface;
         border-top: solid $surface-lighten-1;
+    }
+
+    #archives-filter {
+        margin: 0 0 1 0;
+        height: 3;
     }
 
     #archives-container {
@@ -368,6 +393,7 @@ class ConductorUI(App):
         Binding("v", "restore_archive", "Restore"),
         Binding("c", "show_context", "Context"),
         Binding("p", "spawn_pr", "Spawn PR"),
+        Binding("f", "focus_archives_filter", "Filter Archives"),
         Binding("escape", "quit", "Quit"),
         Binding("1", "select_1", "Agent 1", show=False),
         Binding("2", "select_2", "Agent 2", show=False),
@@ -387,6 +413,7 @@ class ConductorUI(App):
                 yield Static("AGENTS", id="sidebar-header")
                 yield ScrollableContainer(id="agents-container")
                 yield Static("ARCHIVES", id="archives-header")
+                yield Input(placeholder="Filter archives...", id="archives-filter")
                 yield ScrollableContainer(id="archives-container")
             with Vertical(id="main"):
                 yield Static("[b]Select an agent to view details[/]", id="main-header")
@@ -424,12 +451,23 @@ class ConductorUI(App):
 
     def refresh_archives(self) -> None:
         self._archives = get_archived_workspaces()
+        filter_value = ""
+        try:
+            filter_value = self.query_one("#archives-filter", Input).value.strip().lower()
+        except Exception:
+            filter_value = ""
+
+        if filter_value:
+            self._archives = [
+                a for a in self._archives
+                if filter_value in f"{a.get('repo','')}/{a.get('branch','')}".lower()
+            ]
         container = self.query_one("#archives-container", ScrollableContainer)
         container.remove_children()
 
         if not self._archives:
             container.mount(Static(
-                "[dim]No archives[/]",
+                "[dim]No archives\nPress Restore to rehydrate[/]",
                 classes="empty-state"
             ))
         else:
@@ -697,6 +735,12 @@ class ConductorUI(App):
 
         self.push_screen(SpawnPRDialog(), handle_spawn)
 
+    def action_focus_archives_filter(self) -> None:
+        try:
+            self.query_one("#archives-filter", Input).focus()
+        except Exception:
+            return
+
     def action_archive_agent(self) -> None:
         if not self.selected_agent:
             return
@@ -753,52 +797,60 @@ class ConductorUI(App):
             return
 
         archive = self.selected_archive
-        config = load_config()
-        repo_name = archive.get("repo")
-        if repo_name not in config.get("repos", {}):
-            return
 
-        repo_path = Path(config["repos"][repo_name]["path"])
-        branch = archive.get("branch")
-        worktree_path = Path(archive.get("worktree", ""))
+        async def handle_restore(data) -> None:
+            if data is None:
+                return
+            recreate = bool(data.get("recreate"))
 
-        if not worktree_path.exists():
-            if not worktree_path.parent.exists():
-                worktree_path = WORKTREES_DIR / worktree_path.name
-            result = git.worktree_add(repo_path, worktree_path, branch)
-            if result.returncode != 0:
-                result = git.worktree_add(repo_path, worktree_path, branch, force_branch=True)
+            config = load_config()
+            repo_name = archive.get("repo")
+            if repo_name not in config.get("repos", {}):
+                return
+
+            repo_path = Path(config["repos"][repo_name]["path"])
+            branch = archive.get("branch")
+            worktree_path = Path(archive.get("worktree", ""))
+
+            if recreate or not worktree_path.exists():
+                if not worktree_path.parent.exists():
+                    worktree_path = WORKTREES_DIR / worktree_path.name
+                result = git.worktree_add(repo_path, worktree_path, branch)
                 if result.returncode != 0:
-                    log_view = self.query_one("#log-view", RichLog)
-                    log_view.clear()
-                    log_view.write("[bold red]Restore failed.[/]")
-                    return
+                    result = git.worktree_add(repo_path, worktree_path, branch, force_branch=True)
+                    if result.returncode != 0:
+                        log_view = self.query_one("#log-view", RichLog)
+                        log_view.clear()
+                        log_view.write("[bold red]Restore failed.[/]")
+                        return
 
-        _ensure_context_dir(worktree_path)
-        session_name = f"conductor-{worktree_path.name}"
-        if not tmux.session_exists(session_name):
-            tmux.new_session(session_name, worktree_path)
+            _ensure_context_dir(worktree_path)
+            session_name = f"conductor-{worktree_path.name}"
+            if not tmux.session_exists(session_name):
+                tmux.new_session(session_name, worktree_path)
 
-        config["agents"][session_name] = {
-            "repo": repo_name,
-            "branch": branch,
-            "worktree": str(worktree_path),
-            "task": archive.get("task", ""),
-            "agent_type": archive.get("agent_type", "claude"),
-            "started": archive.get("started", ""),
-        }
-        if archive.get("worktree") != str(worktree_path):
-            archive["worktree"] = str(worktree_path)
-        del config["archives"][archive["key"]]
-        save_config(config)
+            config["agents"][session_name] = {
+                "repo": repo_name,
+                "branch": branch,
+                "worktree": str(worktree_path),
+                "task": archive.get("task", ""),
+                "agent_type": archive.get("agent_type", "claude"),
+                "started": archive.get("started", ""),
+            }
+            if archive.get("worktree") != str(worktree_path):
+                archive["worktree"] = str(worktree_path)
+            del config["archives"][archive["key"]]
+            save_config(config)
 
-        self.selected_archive = None
-        self.refresh_archives()
-        self.refresh_agents()
-        self._update_header()
-        log_view = self.query_one("#log-view", RichLog)
-        log_view.clear()
-        log_view.write("[bold green]Workspace restored.[/]")
+            self.selected_archive = None
+            self.refresh_archives()
+            self.refresh_agents()
+            self._update_header()
+            log_view = self.query_one("#log-view", RichLog)
+            log_view.clear()
+            log_view.write("[bold green]Workspace restored.[/]")
+
+        self.push_screen(RestoreOptionsDialog(), handle_restore)
 
     def _select_agent(self, num: int) -> None:
         if 0 < num <= len(self._agents):
