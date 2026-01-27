@@ -35,7 +35,10 @@ def get_git_dir(repo_path: Union[str, Path]) -> Optional[Path]:
             return None
         if text.startswith("gitdir:"):
             git_dir = text.split(":", 1)[1].strip()
-            return Path(git_dir)
+            git_dir_path = Path(git_dir)
+            if not git_dir_path.is_absolute():
+                git_dir_path = (repo_path / git_dir_path).resolve()
+            return git_dir_path
     return None
 
 

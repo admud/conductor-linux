@@ -657,7 +657,14 @@ class ConductorUI(App):
                 tmux.kill_session(session)
                 repo_path = Path(config["repos"][agent_info["repo"]]["path"])
                 worktree_path = Path(agent_info["worktree"])
-                git.worktree_remove(repo_path, worktree_path, force=True)
+                result = git.worktree_remove(repo_path, worktree_path, force=True)
+                if result.returncode != 0:
+                    log_view = self.query_one("#log-view", RichLog)
+                    log_view.clear()
+                    log_view.write("[bold red]Archive failed.[/]")
+                    if result.stderr.strip():
+                        log_view.write(result.stderr.strip())
+                    return
                 archive_entry = {
                     "repo": agent_info["repo"],
                     "branch": agent_info["branch"],
@@ -726,6 +733,8 @@ class ConductorUI(App):
             "agent_type": archive.get("agent_type", "claude"),
             "started": archive.get("started", ""),
         }
+        if archive.get("worktree") != str(worktree_path):
+            archive["worktree"] = str(worktree_path)
         del config["archives"][archive["key"]]
         save_config(config)
 
