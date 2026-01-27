@@ -21,6 +21,7 @@ from textual.widgets import (
 from textual.reactive import reactive
 from textual.message import Message
 from textual.screen import ModalScreen
+from types import SimpleNamespace
 
 # Add src to path for imports when running directly
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -29,6 +30,7 @@ from cdl.core.config import load_config, save_config
 from cdl.core import git, tmux
 from cdl.core.paths import WORKTREES_DIR
 from cdl.commands.agent import _ensure_context_dir
+from cdl.commands.agent import cmd_spawn
 
 
 def get_active_agents() -> list[dict]:
@@ -93,6 +95,33 @@ class ConfirmDialog(ModalScreen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")
 
+
+class SpawnPRDialog(ModalScreen):
+    """Modal dialog to spawn a workspace from a PR."""
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Label("Spawn from PR", id="dialog-message")
+            yield Input(placeholder="PR number or URL", id="pr-input")
+            yield Input(placeholder="Task (optional)", id="task-input")
+            yield Input(placeholder="Agent: claude or codex (default: claude)", id="agent-input")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Spawn", id="spawn", variant="primary")
+                yield Button("Cancel", id="cancel", variant="default")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "spawn":
+            pr_input = self.query_one("#pr-input", Input).value.strip()
+            task_input = self.query_one("#task-input", Input).value.strip()
+            agent_input = self.query_one("#agent-input", Input).value.strip().lower()
+            agent_type = agent_input if agent_input in ("claude", "codex") else "claude"
+            self.dismiss({
+                "pr": pr_input,
+                "task": task_input,
+                "agent_type": agent_type,
+            })
+        else:
+            self.dismiss(None)
 
 class AgentCard(Static):
     """A clickable card representing an agent."""
@@ -290,7 +319,7 @@ class ConductorUI(App):
 
     #dialog {
         width: 50;
-        height: 10;
+        height: 16;
         padding: 1 2;
         background: $surface;
         border: thick $primary;
@@ -337,6 +366,7 @@ class ConductorUI(App):
         Binding("x", "archive_agent", "Archive"),
         Binding("v", "restore_archive", "Restore"),
         Binding("c", "show_context", "Context"),
+        Binding("p", "spawn_pr", "Spawn PR"),
         Binding("escape", "quit", "Quit"),
         Binding("1", "select_1", "Agent 1", show=False),
         Binding("2", "select_2", "Agent 2", show=False),
@@ -642,6 +672,27 @@ class ConductorUI(App):
             ),
             confirm_kill
         )
+
+    def action_spawn_pr(self) -> None:
+        async def handle_spawn(data) -> None:
+            if not data or not data.get("pr"):
+                return
+            args = SimpleNamespace(
+                repo=None,
+                branch=None,
+                task=data.get("task", ""),
+                auto_accept=False,
+                agent=data.get("agent_type", "claude"),
+                label=None,
+                from_pr=data.get("pr"),
+                from_branch=None,
+            )
+            cmd_spawn(args)
+            self.refresh_agents()
+            self.refresh_archives()
+            self._update_header()
+
+        self.push_screen(SpawnPRDialog(), handle_spawn)
 
     def action_archive_agent(self) -> None:
         if not self.selected_agent:
