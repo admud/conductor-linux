@@ -29,6 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.
 - Python 3.10+
 - git
 - tmux
+- `textual` (required for `cdl-ui` only)
 - [Claude Code CLI](https://claude.ai/code) (`claude`) and/or [Codex CLI](https://openai.com/codex/) (`codex`)
 - Optional: [GitHub CLI](https://cli.github.com/) (`gh`) for PR workflow
 - Optional: `fzf` for interactive picker
@@ -75,6 +76,7 @@ Credentials stored in: `~/.codex/`
 git clone https://github.com/admud/conductor-linux.git ~/.cdl
 cd ~/.cdl
 pip install -r requirements.txt
+# If you only need the CLI, you can skip `textual`, but `cdl-ui` requires it.
 
 # Add to PATH (add to your .bashrc or .zshrc)
 export PATH="$HOME/.cdl/bin:$PATH"
