@@ -16,7 +16,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
 from textual.widgets import (
     Header, Footer, Static, Button, Label, RichLog,
-    DataTable, Input, Rule,
+    DataTable, Input, Rule, TextArea,
 )
 from textual.reactive import reactive
 from textual.message import Message
@@ -156,6 +156,29 @@ class PRMergeDialog(ModalScreen):
             self.dismiss(None)
 
 
+class ContextEditorDialog(ModalScreen):
+    """Modal dialog to view/edit .context/notes.md."""
+
+    def __init__(self, current_text: str):
+        super().__init__()
+        self.current_text = current_text
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Label("Edit .context/notes.md", id="dialog-message")
+            yield TextArea(self.current_text, id="context-input")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Save", id="save", variant="primary")
+                yield Button("Cancel", id="cancel", variant="default")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            text = self.query_one("#context-input", TextArea).text
+            self.dismiss(text)
+        else:
+            self.dismiss(None)
+
+
 class RestoreOptionsDialog(ModalScreen):
     """Modal dialog to restore an archived workspace."""
 
@@ -250,6 +273,7 @@ class ActionBar(Horizontal):
         yield Button("Logs", id="btn-logs", variant="default")
         yield Button("Diff", id="btn-diff", variant="default")
         yield Button("Context", id="btn-context", variant="default")
+        yield Button("Edit Notes", id="btn-edit-notes", variant="primary")
         yield Button("Archive", id="btn-archive", variant="warning")
         yield Button("Restore", id="btn-restore", variant="success")
         yield Button("Kill", id="btn-kill", variant="error")
@@ -386,6 +410,10 @@ class ConductorUI(App):
         align: center middle;
     }
 
+    #context-input {
+        height: 6;
+    }
+
     #dialog-message {
         width: 100%;
         height: 3;
@@ -428,6 +456,7 @@ class ConductorUI(App):
         Binding("c", "show_context", "Context"),
         Binding("p", "spawn_pr", "Spawn PR"),
         Binding("f", "focus_archives_filter", "Filter Archives"),
+        Binding("e", "edit_notes", "Edit Notes"),
         Binding("escape", "quit", "Quit"),
         Binding("1", "select_1", "Agent 1", show=False),
         Binding("2", "select_2", "Agent 2", show=False),
@@ -614,6 +643,14 @@ class ConductorUI(App):
                 log_view.write("  [dim]...[/]")
             log_view.write("")
 
+    def _get_notes_path(self) -> Path | None:
+        if not self.selected_agent:
+            return None
+        worktree = Path(self.selected_agent["worktree"])
+        context_dir = worktree / ".context"
+        context_dir.mkdir(parents=True, exist_ok=True)
+        return context_dir / "notes.md"
+
     def _show_archive_details(self) -> None:
         """Display details for selected archive."""
         if not self.selected_archive:
@@ -695,6 +732,8 @@ class ConductorUI(App):
             self.action_pr_view()
         elif button_id == "btn-pr-merge":
             self.action_pr_merge()
+        elif button_id == "btn-edit-notes":
+            self.action_edit_notes()
         elif button_id == "btn-archive":
             self.action_archive_agent()
         elif button_id == "btn-restore":
@@ -806,6 +845,30 @@ class ConductorUI(App):
             cmd_pr_merge(args)
 
         self.push_screen(PRMergeDialog(), handle_merge)
+
+    def action_edit_notes(self) -> None:
+        if not self.selected_agent:
+            return
+        notes_path = self._get_notes_path()
+        if not notes_path:
+            return
+        try:
+            current = notes_path.read_text(encoding="utf-8")
+        except OSError:
+            current = ""
+
+        async def handle_save(text) -> None:
+            if text is None:
+                return
+            try:
+                notes_path.write_text(text, encoding="utf-8")
+            except OSError:
+                return
+            self.view_mode = "context"
+            self._update_header()
+            self.refresh_view()
+
+        self.push_screen(ContextEditorDialog(current), handle_save)
 
     def action_archive_agent(self) -> None:
         if not self.selected_agent:
