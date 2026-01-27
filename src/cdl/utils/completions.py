@@ -26,7 +26,7 @@ _cdl_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="add list spawn status attach diff merge logs kill killall pick completions pr s a l k d"
+    commands="add list spawn status attach diff merge logs kill killall pick completions pr archives archive restore s a l k d"
 
     case "${prev}" in
         cdl)
@@ -53,6 +53,9 @@ _cdl_completions() {
             COMPREPLY=( $(compgen -W "bash zsh fish" -- ${cur}) )
             return 0
             ;;
+        archives|archive|restore)
+            return 0
+            ;;
         pr)
             COMPREPLY=( $(compgen -W "create view merge" -- ${cur}) )
             return 0
@@ -66,7 +69,7 @@ _cdl_completions() {
     # Complete flags
     case "${cur}" in
         -*)
-            local flags="-h --help -t --task -y --auto-accept -n --no-auto-accept -c --cleanup -f --follow --json -j --base --title --body --fill --draft --web --merge --squash --rebase --delete-branch --auto"
+            local flags="-h --help -t --task -y --auto-accept -n --no-auto-accept -c --cleanup -f --follow --json -j --base --title --body --fill --draft --web --merge --squash --rebase --delete-branch --auto --from-pr --from-branch --keep-worktree --recreate"
             COMPREPLY=( $(compgen -W "${flags}" -- ${cur}) )
             return 0
             ;;
@@ -104,6 +107,9 @@ _cdl() {
         'pick:Interactive agent picker'
         'completions:Generate shell completions'
         'pr:Pull request workflow'
+        'archives:List archived workspaces'
+        'archive:Archive a workspace'
+        'restore:Restore an archived workspace'
     )
 
     _arguments -C \\
@@ -133,6 +139,8 @@ _cdl() {
                     if (( CURRENT == 3 )); then
                         _values 'pr subcommand' create view merge
                     fi
+                    ;;
+                archives|archive|restore)
                     ;;
             esac
             ;;
@@ -165,6 +173,11 @@ complete -c cdl -n "__fish_use_subcommand" -a "killall" -d "Kill all agents"
 complete -c cdl -n "__fish_use_subcommand" -a "pick" -d "Interactive agent picker"
 complete -c cdl -n "__fish_use_subcommand" -a "completions" -d "Generate shell completions"
 complete -c cdl -n "__fish_use_subcommand" -a "pr" -d "Pull request workflow"
+complete -c cdl -n "__fish_use_subcommand" -a "archives" -d "List archived workspaces"
+complete -c cdl -n "__fish_use_subcommand" -a "archive" -d "Archive a workspace"
+complete -c cdl -n "__fish_use_subcommand_from archive" -l keep-worktree -d "Keep worktree on disk"
+complete -c cdl -n "__fish_use_subcommand" -a "restore" -d "Restore an archived workspace"
+complete -c cdl -n "__fish_seen_subcommand_from restore" -l recreate -d "Recreate worktree"
 
 # Completions subcommand
 complete -c cdl -n "__fish_seen_subcommand_from completions" -a "bash zsh fish"

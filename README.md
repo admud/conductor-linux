@@ -22,6 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/admud/conductor-linux/main/install.
 - **Config file** - Customize defaults
 - View diffs and changes across all agents
 - Push agent branches back when ready
+- Archive and restore workspaces
 
 ## Requirements
 
@@ -92,6 +93,8 @@ cdl add https://github.com/user/repo.git
 # 2. Spawn agents on different branches
 cdl spawn myrepo feature-auth --task "Implement OAuth login"
 cdl spawn myrepo feature-tests --task "Add unit tests"
+cdl spawn --from-pr 123 --task "Review and fix PR"
+cdl spawn --from-branch hotfix/login --task "Hotfix login bug"
 
 # 3. Monitor all agents
 cdl status          # or: cdl s
@@ -119,6 +122,11 @@ cdl pr create 1 --fill
 
 # 9. Cleanup
 cdl kill 1 --cleanup   # or: cdl k 1 -c
+
+# 10. Archive and restore
+cdl archive 1
+cdl archives
+cdl restore
 ```
 
 ## Commands
@@ -138,6 +146,9 @@ cdl kill 1 --cleanup   # or: cdl k 1 -c
 | `cdl pick` | | Interactive agent picker (for scripting) |
 | `cdl completions <shell>` | | Generate shell completions |
 | `cdl pr <create|view|merge>` | | Create/view/merge GitHub PRs for agent branches |
+| `cdl archives` | | List archived workspaces |
+| `cdl archive [n]` | | Archive a workspace |
+| `cdl restore [name]` | | Restore an archived workspace |
 | `cdl-ui` | | Launch TUI dashboard |
 
 > **Note:** Commands without `[n]` argument will show an interactive picker (requires `fzf` or falls back to numbered menu).
@@ -168,6 +179,16 @@ cdl pr view 1 --web
 cdl pr merge 1 --squash --delete-branch
 ```
 
+### Archive/Restore Workflow
+
+```bash
+cdl archive 1
+cdl archives
+cdl restore
+```
+
+> **Note:** `cdl archive` removes the worktree by default. Use `--keep-worktree` to keep it on disk.
+
 ### Spawn Options
 
 ```bash
@@ -179,7 +200,11 @@ Options:
   -y, --auto-accept    Enable auto-accept mode (no permission prompts)
   -n, --no-auto-accept Run in interactive/print mode (default)
   -l, --label <name>   Label for grouping agents
+  --from-pr <id|url>   Create workspace from a GitHub PR
+  --from-branch <name> Create workspace from a branch name
 ```
+
+> **Note:** `--from-pr` requires the GitHub CLI (`gh`) to be installed and authenticated.
 
 > **Tip:** If you omit `<repo>` or `<branch>`, CDL will prompt you to select a repo and enter a branch name (defaults to the current branch).
 

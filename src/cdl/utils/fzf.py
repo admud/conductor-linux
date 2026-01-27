@@ -121,3 +121,58 @@ def pick_repo(repos: dict, prompt: str = "Select repository: ") -> Optional[str]
 
     except subprocess.SubprocessError:
         return None
+
+
+def pick_archive(archives: dict, prompt: str = "Select archive: ") -> Optional[str]:
+    """
+    Use fzf to pick an archive from the config.
+
+    Returns the archive key, or None if cancelled.
+    """
+    if not archives:
+        return None
+
+    keys = list(archives.keys())
+
+    if not has_fzf():
+        print(prompt)
+        for i, key in enumerate(keys, 1):
+            entry = archives[key]
+            print(f"  {i}: {entry.get('repo', '')}/{entry.get('branch', '')}")
+        try:
+            choice = input("\nEnter number (or 'q' to cancel): ").strip()
+            if choice.lower() == 'q':
+                return None
+            num = int(choice)
+            if 1 <= num <= len(keys):
+                return keys[num - 1]
+        except (ValueError, EOFError, KeyboardInterrupt):
+            pass
+        return None
+
+    try:
+        lines = []
+        for key in keys:
+            entry = archives[key]
+            repo = entry.get("repo", "")
+            branch = entry.get("branch", "")
+            lines.append(f"{key}: {repo}/{branch}")
+
+        result = subprocess.run(
+            ["fzf", "--prompt", prompt, "--height", "40%", "--reverse"],
+            input="\n".join(lines),
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            return None
+
+        selected = result.stdout.strip()
+        if not selected:
+            return None
+
+        return selected.split(":", 1)[0]
+
+    except subprocess.SubprocessError:
+        return None

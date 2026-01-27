@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -11,7 +12,94 @@ from ..core.config import load_config, save_config
 from ..core.paths import WORKTREES_DIR
 from ..utils.colors import Colors, c
 from ..utils.fzf import pick_repo
+from ..utils.process import check_command_exists
 from .repo import get_active_agents
+
+
+def _ensure_context_dir(worktree_path: Path) -> None:
+    """Create .context and add it to the worktree git exclude."""
+    context_dir = worktree_path / ".context"
+    context_dir.mkdir(parents=True, exist_ok=True)
+
+    git_dir = git.get_git_dir(worktree_path)
+    if not git_dir:
+        return
+
+    exclude_path = git_dir / "info" / "exclude"
+    try:
+        if exclude_path.exists():
+            contents = exclude_path.read_text()
+        else:
+            contents = ""
+        if ".context/" not in contents:
+            with open(exclude_path, "a", encoding="utf-8") as f:
+                if contents and not contents.endswith("\n"):
+                    f.write("\n")
+                f.write(".context/\n")
+    except OSError:
+        return
+
+
+def _find_repo_by_full_name(config: dict, full_name: str) -> Optional[str]:
+    """Find a registered repo by GitHub full name (owner/name)."""
+    full_name = full_name.lower().strip()
+    for name, info in config.get("repos", {}).items():
+        url = info.get("url", "").lower()
+        if full_name in url:
+            return name
+    return None
+
+
+def _resolve_from_pr(pr_ref: str, config: dict) -> tuple[Optional[str], Optional[str]]:
+    """Resolve repo and branch from a GitHub PR reference using gh."""
+    if not check_command_exists("gh"):
+        print(c("Missing dependency: gh (GitHub CLI).", Colors.RED))
+        print("Install it from: https://cli.github.com/")
+        return None, None
+
+    auth = git.run_raw(["gh", "auth", "status"], cwd=None)
+    if auth.returncode != 0:
+        print(c("GitHub CLI is not authenticated.", Colors.RED))
+        print("Run: gh auth login")
+        return None, None
+
+    result = git.run_raw(
+        ["gh", "pr", "view", pr_ref, "--json", "headRefName,headRepositoryOwner,headRepository"],
+        cwd=None,
+    )
+    if result.returncode != 0:
+        print(c("Failed to resolve PR via gh.", Colors.RED))
+        if result.stderr.strip():
+            print(result.stderr.strip())
+        return None, None
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        print(c("Unexpected gh output while resolving PR.", Colors.RED))
+        return None, None
+
+    branch = data.get("headRefName")
+    owner = data.get("headRepositoryOwner", {}).get("login") if isinstance(
+        data.get("headRepositoryOwner"), dict
+    ) else None
+    repo = data.get("headRepository", {}).get("name") if isinstance(
+        data.get("headRepository"), dict
+    ) else None
+
+    if not branch or not owner or not repo:
+        print(c("Could not determine PR branch/repo from gh output.", Colors.RED))
+        return None, None
+
+    full_name = f"{owner}/{repo}"
+    repo_name = _find_repo_by_full_name(config, full_name)
+    if not repo_name:
+        print(c(f"PR repo {full_name} not registered. Select a repo.", Colors.YELLOW))
+        repo_name = pick_repo(config.get("repos", {}), "Select repository: ")
+        if not repo_name:
+            return None, None
+
+    return repo_name, branch
 
 
 def _build_claude_command(task: str, auto_accept: bool) -> list[str]:
@@ -55,6 +143,23 @@ def cmd_spawn(args) -> None:
     agent_type = getattr(args, 'agent', 'claude')
 
     config = load_config()
+
+    if getattr(args, "from_pr", None) and getattr(args, "from_branch", None):
+        print(c("Use only one of --from-pr or --from-branch.", Colors.RED))
+        return
+
+    if getattr(args, "from_pr", None):
+        repo_name, branch_name = _resolve_from_pr(args.from_pr, config)
+        if not repo_name or not branch_name:
+            return
+
+    if getattr(args, "from_branch", None):
+        if not repo_name:
+            repo_name = pick_repo(config.get("repos", {}), "Select repository: ")
+            if not repo_name:
+                print(c("No repository selected.", Colors.YELLOW))
+                return
+        branch_name = args.from_branch
 
     if not repo_name:
         repo_name = pick_repo(config.get("repos", {}), "Select repository: ")
@@ -114,6 +219,9 @@ def cmd_spawn(args) -> None:
     agent_label = "Codex" if agent_type == "codex" else "Claude Code"
     print(c(f"Spawning {agent_label} agent...", Colors.CYAN))
     tmux.new_session(session_name, worktree_path, agent_cmd)
+
+    # Create shared context directory (gitignored)
+    _ensure_context_dir(worktree_path)
 
     # Track the agent
     config["agents"][session_name] = {

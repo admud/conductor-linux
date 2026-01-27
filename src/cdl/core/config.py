@@ -20,10 +20,17 @@ def load_config() -> dict[str, Any]:
         Returns empty config if file doesn't exist or is corrupted.
     """
     if not CONFIG_FILE.exists():
-        return {"repos": {}, "agents": {}}
+        return {"repos": {}, "agents": {}, "archives": {}}
 
     try:
-        return json.loads(CONFIG_FILE.read_text())
+        data = json.loads(CONFIG_FILE.read_text())
+        if "repos" not in data:
+            data["repos"] = {}
+        if "agents" not in data:
+            data["agents"] = {}
+        if "archives" not in data:
+            data["archives"] = {}
+        return data
     except json.JSONDecodeError:
         # Backup corrupted config and return empty
         backup = CONFIG_FILE.with_suffix(".json.bak")

@@ -9,7 +9,7 @@ from .utils.colors import Colors, c
 from .utils.process import check_command_exists
 from .core.config import init_config
 from .core.user_config import load_user_config
-from .commands import repo, agent, monitor, sync, pr
+from .commands import repo, agent, monitor, sync, pr, workspace
 
 
 def check_dependencies(agent_type: str = "claude") -> list[str]:
@@ -66,6 +66,8 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("repo", nargs="?", help="Repository name (fzf picker if omitted)")
     p.add_argument("branch", nargs="?", help="Branch to work on")
     p.add_argument("--task", "-t", help="Task/prompt for the agent")
+    p.add_argument("--from-pr", help="Create workspace from a GitHub PR (number or URL)")
+    p.add_argument("--from-branch", help="Create workspace from a branch name")
     p.add_argument(
         "--agent", "-a",
         choices=["claude", "codex"],
@@ -129,6 +131,20 @@ def create_parser() -> argparse.ArgumentParser:
     # completions
     p = subparsers.add_parser("completions", help="Generate shell completions")
     p.add_argument("shell", choices=["bash", "zsh", "fish"], help="Shell type")
+
+    # archives
+    p = subparsers.add_parser("archives", help="List archived workspaces")
+    add_json_flag(p)
+
+    # archive
+    p = subparsers.add_parser("archive", help="Archive an agent workspace")
+    p.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
+    p.add_argument("--keep-worktree", action="store_true", help="Keep worktree on disk")
+
+    # restore
+    p = subparsers.add_parser("restore", help="Restore an archived workspace")
+    p.add_argument("name", nargs="?", help="Archive name (fzf picker if omitted)")
+    p.add_argument("--recreate", action="store_true", help="Recreate worktree even if present")
 
     # pr
     p = subparsers.add_parser("pr", help="GitHub pull request workflow")
@@ -202,6 +218,9 @@ def main() -> int:
         "pick": monitor.cmd_pick,
         "completions": cmd_completions,
         "pr": cmd_pr,
+        "archives": workspace.cmd_archives,
+        "archive": workspace.cmd_archive,
+        "restore": workspace.cmd_restore,
     }
 
     if command in commands:

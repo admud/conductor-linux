@@ -22,6 +22,23 @@ def run_raw(
     return run(args, cwd=cwd)
 
 
+def get_git_dir(repo_path: Union[str, Path]) -> Optional[Path]:
+    """Resolve the actual git directory for a repo or worktree."""
+    repo_path = Path(repo_path)
+    git_path = repo_path / ".git"
+    if git_path.is_dir():
+        return git_path
+    if git_path.is_file():
+        try:
+            text = git_path.read_text().strip()
+        except OSError:
+            return None
+        if text.startswith("gitdir:"):
+            git_dir = text.split(":", 1)[1].strip()
+            return Path(git_dir)
+    return None
+
+
 def worktree_add(
     repo_path: Path,
     worktree_path: Path,
