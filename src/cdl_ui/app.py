@@ -647,9 +647,8 @@ class ConductorUI(App):
         if not self.selected_agent:
             return None
         worktree = Path(self.selected_agent["worktree"])
-        context_dir = worktree / ".context"
-        context_dir.mkdir(parents=True, exist_ok=True)
-        return context_dir / "notes.md"
+        _ensure_context_dir(worktree)
+        return worktree / ".context" / "notes.md"
 
     def _show_archive_details(self) -> None:
         """Display details for selected archive."""
@@ -822,7 +821,7 @@ class ConductorUI(App):
         if not self.selected_agent:
             return
         args = SimpleNamespace(
-            session=str(self._agents.index(self.selected_agent) + 1),
+            session=self.selected_agent["session"],
             web=False,
         )
         cmd_pr_view(args)
@@ -835,7 +834,7 @@ class ConductorUI(App):
             if data is None:
                 return
             args = SimpleNamespace(
-                session=str(self._agents.index(self.selected_agent) + 1),
+                session=self.selected_agent["session"],
                 merge=data.get("mode") == "merge",
                 squash=data.get("mode") == "squash",
                 rebase=data.get("mode") == "rebase",
