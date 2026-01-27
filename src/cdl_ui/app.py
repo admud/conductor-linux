@@ -31,6 +31,7 @@ from cdl.core import git, tmux
 from cdl.core.paths import WORKTREES_DIR
 from cdl.commands.agent import _ensure_context_dir
 from cdl.commands.agent import cmd_spawn
+from cdl.commands.pr import cmd_pr_view, cmd_pr_merge
 
 
 def get_active_agents() -> list[dict]:
@@ -124,6 +125,37 @@ class SpawnPRDialog(ModalScreen):
             self.dismiss(None)
 
 
+class PRMergeDialog(ModalScreen):
+    """Modal dialog to merge a PR for the selected agent."""
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Label("Merge PR", id="dialog-message")
+            yield Label("Options: [squash|merge|rebase], [delete], [auto]", id="merge-hint")
+            yield Input(placeholder="e.g. squash delete", id="merge-input")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Merge", id="merge", variant="primary")
+                yield Button("Cancel", id="cancel", variant="default")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "merge":
+            value = self.query_one("#merge-input", Input).value.strip().lower()
+            tokens = {t for t in value.split() if t}
+            mode = (
+                "squash" if "squash" in tokens else
+                "merge" if "merge" in tokens else
+                "rebase" if "rebase" in tokens else
+                None
+            )
+            self.dismiss({
+                "mode": mode,
+                "delete": "delete" in tokens,
+                "auto": "auto" in tokens,
+            })
+        else:
+            self.dismiss(None)
+
+
 class RestoreOptionsDialog(ModalScreen):
     """Modal dialog to restore an archived workspace."""
 
@@ -212,6 +244,8 @@ class ActionBar(Horizontal):
 
     def compose(self) -> ComposeResult:
         yield Button("Spawn PR", id="btn-spawn-pr", variant="success")
+        yield Button("PR View", id="btn-pr-view", variant="default")
+        yield Button("PR Merge", id="btn-pr-merge", variant="warning")
         yield Button("Attach", id="btn-attach", variant="primary")
         yield Button("Logs", id="btn-logs", variant="default")
         yield Button("Diff", id="btn-diff", variant="default")
@@ -657,6 +691,10 @@ class ConductorUI(App):
             self.action_show_context()
         elif button_id == "btn-spawn-pr":
             self.action_spawn_pr()
+        elif button_id == "btn-pr-view":
+            self.action_pr_view()
+        elif button_id == "btn-pr-merge":
+            self.action_pr_merge()
         elif button_id == "btn-archive":
             self.action_archive_agent()
         elif button_id == "btn-restore":
@@ -740,6 +778,34 @@ class ConductorUI(App):
             self.query_one("#archives-filter", Input).focus()
         except Exception:
             return
+
+    def action_pr_view(self) -> None:
+        if not self.selected_agent:
+            return
+        args = SimpleNamespace(
+            session=str(self._agents.index(self.selected_agent) + 1),
+            web=False,
+        )
+        cmd_pr_view(args)
+
+    def action_pr_merge(self) -> None:
+        if not self.selected_agent:
+            return
+
+        async def handle_merge(data) -> None:
+            if data is None:
+                return
+            args = SimpleNamespace(
+                session=str(self._agents.index(self.selected_agent) + 1),
+                merge=data.get("mode") == "merge",
+                squash=data.get("mode") == "squash",
+                rebase=data.get("mode") == "rebase",
+                delete_branch=bool(data.get("delete")),
+                auto=bool(data.get("auto")),
+            )
+            cmd_pr_merge(args)
+
+        self.push_screen(PRMergeDialog(), handle_merge)
 
     def action_archive_agent(self) -> None:
         if not self.selected_agent:
