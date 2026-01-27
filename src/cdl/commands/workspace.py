@@ -148,13 +148,13 @@ def cmd_archives(args) -> None:
     config = load_config()
     archives = config.get("archives", {})
 
-    if not archives:
-        print(c("No archived workspaces.", Colors.DIM))
-        return
-
     if getattr(args, "json", False):
         import json
         print(json.dumps(archives, indent=2))
+        return
+
+    if not archives:
+        print(c("No archived workspaces.", Colors.DIM))
         return
 
     print(c("\n=== ARCHIVED WORKSPACES ===", Colors.BOLD))

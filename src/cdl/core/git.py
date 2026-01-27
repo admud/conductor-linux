@@ -42,6 +42,24 @@ def get_git_dir(repo_path: Union[str, Path]) -> Optional[Path]:
     return None
 
 
+def get_common_git_dir(repo_path: Union[str, Path]) -> Optional[Path]:
+    """Resolve the common git directory for a repo or worktree."""
+    git_dir = get_git_dir(repo_path)
+    if not git_dir:
+        return None
+    commondir = git_dir / "commondir"
+    if commondir.exists():
+        try:
+            text = commondir.read_text().strip()
+        except OSError:
+            return git_dir
+        common_path = Path(text)
+        if not common_path.is_absolute():
+            common_path = (git_dir / common_path).resolve()
+        return common_path
+    return git_dir
+
+
 def worktree_add(
     repo_path: Path,
     worktree_path: Path,

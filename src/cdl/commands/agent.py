@@ -21,7 +21,7 @@ def _ensure_context_dir(worktree_path: Path) -> None:
     context_dir = worktree_path / ".context"
     context_dir.mkdir(parents=True, exist_ok=True)
 
-    git_dir = git.get_git_dir(worktree_path)
+    git_dir = git.get_common_git_dir(worktree_path)
     if not git_dir:
         return
 

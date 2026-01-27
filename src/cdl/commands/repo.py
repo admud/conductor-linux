@@ -16,7 +16,10 @@ from ..utils.colors import Colors, c
 def cmd_add(args) -> None:
     """Add/clone a repository."""
     repo_url = args.repo
-    name = args.name or Path(repo_url.rstrip("/").rstrip(".git")).name
+    clean_url = repo_url.rstrip("/")
+    if clean_url.endswith(".git"):
+        clean_url = clean_url[:-4]
+    name = args.name or Path(clean_url).name
     repo_path = REPOS_DIR / name
 
     if repo_path.exists():
