@@ -26,7 +26,7 @@ _cdl_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="add list spawn status attach diff merge logs kill killall pick completions pr archives archive restore s a l k d"
+    commands="add list spawn status attach diff merge logs kill killall pick completions pr archives archive restore open s a l k d"
 
     case "${prev}" in
         cdl)
@@ -53,7 +53,7 @@ _cdl_completions() {
             COMPREPLY=( $(compgen -W "bash zsh fish" -- ${cur}) )
             return 0
             ;;
-        archives|archive|restore)
+        archives|archive|restore|open)
             return 0
             ;;
         pr)
@@ -110,6 +110,7 @@ _cdl() {
         'archives:List archived workspaces'
         'archive:Archive a workspace'
         'restore:Restore an archived workspace'
+        'open:Open a worktree in an editor'
     )
 
     _arguments -C \\
@@ -140,7 +141,7 @@ _cdl() {
                         _values 'pr subcommand' create view merge
                     fi
                     ;;
-                archives|archive|restore)
+                archives|archive|restore|open)
                     ;;
             esac
             ;;
@@ -178,6 +179,8 @@ complete -c cdl -n "__fish_use_subcommand" -a "archive" -d "Archive a workspace"
 complete -c cdl -n "__fish_use_subcommand_from archive" -l keep-worktree -d "Keep worktree on disk"
 complete -c cdl -n "__fish_use_subcommand" -a "restore" -d "Restore an archived workspace"
 complete -c cdl -n "__fish_seen_subcommand_from restore" -l recreate -d "Recreate worktree"
+complete -c cdl -n "__fish_use_subcommand" -a "open" -d "Open a worktree in an editor"
+complete -c cdl -n "__fish_seen_subcommand_from open" -s e -l editor -d "Editor command"
 
 # Completions subcommand
 complete -c cdl -n "__fish_seen_subcommand_from completions" -a "bash zsh fish"

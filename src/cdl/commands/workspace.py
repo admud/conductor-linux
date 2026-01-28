@@ -1,9 +1,11 @@
-"""Workspace lifecycle commands: archive, restore, list."""
+"""Workspace lifecycle commands: archive, restore, list, open."""
 
 from __future__ import annotations
 
 from datetime import datetime
+import os
 from pathlib import Path
+import subprocess
 from typing import Optional
 
 from ..core import git, tmux
@@ -178,3 +180,21 @@ def cmd_archives(args) -> None:
         branch = entry.get("branch", "")
         archived_at = entry.get("archived_at", "")
         print(f"  [{i}] {c(repo, Colors.CYAN)}:{c(branch, Colors.YELLOW)}  {archived_at}")
+
+
+def cmd_open(args) -> None:
+    """Open a worktree in an editor."""
+    agent = _resolve_active_agent(args.session)
+    if not agent:
+        return
+
+    editor = args.editor
+    if not editor:
+        editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "code"
+
+    worktree_path = Path(agent["worktree"])
+    try:
+        subprocess.Popen([editor, str(worktree_path)])
+        print(c(f"+ Opened {worktree_path} in {editor}", Colors.GREEN))
+    except FileNotFoundError:
+        print(c(f"Editor not found: {editor}", Colors.RED))

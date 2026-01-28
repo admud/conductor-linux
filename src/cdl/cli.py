@@ -149,6 +149,11 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("name", nargs="?", help="Archive name (fzf picker if omitted)")
     p.add_argument("--recreate", action="store_true", help="Recreate worktree even if present")
 
+    # open
+    p = subparsers.add_parser("open", help="Open a worktree in an editor")
+    p.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
+    p.add_argument("--editor", "-e", help="Editor command (code, nvim, idea, etc.)")
+
     # pr
     p = subparsers.add_parser("pr", help="GitHub pull request workflow")
     pr_sub = p.add_subparsers(dest="pr_command", help="PR commands")
@@ -224,6 +229,7 @@ def main() -> int:
         "archives": workspace.cmd_archives,
         "archive": workspace.cmd_archive,
         "restore": workspace.cmd_restore,
+        "open": workspace.cmd_open,
     }
 
     if command in commands:
