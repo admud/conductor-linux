@@ -32,6 +32,7 @@ from cdl.core.paths import WORKTREES_DIR
 from cdl.commands.agent import _ensure_context_dir
 from cdl.commands.agent import cmd_spawn
 from cdl.commands.pr import cmd_pr_view, cmd_pr_merge
+from cdl.utils.process import check_command_exists
 
 
 def get_active_agents() -> list[dict]:
@@ -269,6 +270,7 @@ class ActionBar(Horizontal):
         yield Button("Spawn PR", id="btn-spawn-pr", variant="success")
         yield Button("PR View", id="btn-pr-view", variant="default")
         yield Button("PR Merge", id="btn-pr-merge", variant="warning")
+        yield Button("PR Checks", id="btn-pr-checks", variant="default")
         yield Button("Attach", id="btn-attach", variant="primary")
         yield Button("Logs", id="btn-logs", variant="default")
         yield Button("Diff", id="btn-diff", variant="default")
@@ -731,6 +733,8 @@ class ConductorUI(App):
             self.action_pr_view()
         elif button_id == "btn-pr-merge":
             self.action_pr_merge()
+        elif button_id == "btn-pr-checks":
+            self.action_pr_checks()
         elif button_id == "btn-edit-notes":
             self.action_edit_notes()
         elif button_id == "btn-archive":
@@ -844,6 +848,31 @@ class ConductorUI(App):
             cmd_pr_merge(args)
 
         self.push_screen(PRMergeDialog(), handle_merge)
+
+    def action_pr_checks(self) -> None:
+        if not self.selected_agent:
+            return
+        if not check_command_exists("gh"):
+            log_view = self.query_one("#log-view", RichLog)
+            log_view.clear()
+            log_view.write("[bold red]Missing dependency: gh (GitHub CLI).[/]")
+            log_view.write("Install it from: https://cli.github.com/")
+            return
+
+        worktree = Path(self.selected_agent["worktree"])
+        branch = self.selected_agent["branch"]
+        result = git.run_raw(["gh", "pr", "checks", "--head", branch], cwd=worktree)
+
+        log_view = self.query_one("#log-view", RichLog)
+        log_view.clear()
+        if result.returncode == 0:
+            output = result.stdout.strip() or "No checks found."
+            for line in output.splitlines():
+                log_view.write(line)
+        else:
+            log_view.write("[bold red]PR checks failed.[/]")
+            if result.stderr.strip():
+                log_view.write(result.stderr.strip())
 
     def action_edit_notes(self) -> None:
         if not self.selected_agent:
