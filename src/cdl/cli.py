@@ -68,6 +68,9 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--task", "-t", help="Task/prompt for the agent")
     p.add_argument("--from-pr", help="Create workspace from a GitHub PR (number or URL)")
     p.add_argument("--from-branch", help="Create workspace from a branch name")
+    p.add_argument("--link-node-modules", action="store_true", help="Symlink node_modules from base repo")
+    p.add_argument("--link-venv", action="store_true", help="Symlink .venv from base repo")
+    p.add_argument("--copy-env", action="store_true", help="Copy .env from base repo if present")
     p.add_argument(
         "--agent", "-a",
         choices=["claude", "codex"],

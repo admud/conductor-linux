@@ -204,6 +204,9 @@ Options:
   -l, --label <name>   Label for grouping agents
   --from-pr <id|url>   Create workspace from a GitHub PR
   --from-branch <name> Create workspace from a branch name
+  --link-node-modules Symlink node_modules from the base repo
+  --link-venv         Symlink .venv from the base repo
+  --copy-env          Copy .env from the base repo if present
 ```
 
 > **Note:** `--from-pr` requires the GitHub CLI (`gh`) to be installed and authenticated.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import os
 import json
 from pathlib import Path
 from typing import Optional
@@ -38,6 +39,58 @@ def _ensure_context_dir(worktree_path: Path) -> None:
                 f.write(".context/\n")
     except OSError:
         return
+
+
+def _safe_symlink(src: Path, dest: Path) -> None:
+    """Create a symlink if possible, without overwriting existing files."""
+    try:
+        if dest.exists() or dest.is_symlink():
+            try:
+                if dest.is_symlink() and dest.resolve() == src.resolve():
+                    return
+            except OSError:
+                return
+            return
+        dest.symlink_to(src)
+    except OSError:
+        return
+
+
+def _copy_file(src: Path, dest: Path) -> None:
+    """Copy a file if destination doesn't exist."""
+    try:
+        if dest.exists():
+            return
+        dest.write_bytes(src.read_bytes())
+    except OSError:
+        return
+
+
+def _link_shared_paths(
+    base_path: Path,
+    worktree_path: Path,
+    link_node_modules: bool,
+    link_venv: bool,
+    copy_env: bool,
+) -> None:
+    """Optionally link shared dependency folders or copy .env."""
+    if link_node_modules:
+        src = base_path / "node_modules"
+        dest = worktree_path / "node_modules"
+        if src.exists() and src.is_dir():
+            _safe_symlink(src, dest)
+
+    if link_venv:
+        src = base_path / ".venv"
+        dest = worktree_path / ".venv"
+        if src.exists() and src.is_dir():
+            _safe_symlink(src, dest)
+
+    if copy_env:
+        src = base_path / ".env"
+        dest = worktree_path / ".env"
+        if src.exists() and src.is_file():
+            _copy_file(src, dest)
 
 
 def _find_repo_by_full_name(config: dict, full_name: str) -> Optional[str]:
@@ -141,6 +194,9 @@ def cmd_spawn(args) -> None:
     task = args.task or ""
     auto_accept = args.auto_accept
     agent_type = getattr(args, 'agent', 'claude')
+    link_node_modules = getattr(args, "link_node_modules", False)
+    link_venv = getattr(args, "link_venv", False)
+    copy_env = getattr(args, "copy_env", False)
 
     config = load_config()
 
@@ -172,6 +228,10 @@ def cmd_spawn(args) -> None:
         return
 
     repo_path = Path(config["repos"][repo_name]["path"])
+    repo_url = config["repos"][repo_name].get("url", "")
+    base_path = repo_path
+    if repo_url and os.path.exists(repo_url):
+        base_path = Path(repo_url)
     if not branch_name:
         default_branch = git.get_current_branch(repo_path) or "main"
         prompt = c(f"Branch name [{default_branch}]: ", Colors.BOLD)
@@ -222,6 +282,15 @@ def cmd_spawn(args) -> None:
 
     # Create shared context directory (gitignored)
     _ensure_context_dir(worktree_path)
+
+    # Optional shared deps
+    _link_shared_paths(
+        base_path=base_path,
+        worktree_path=worktree_path,
+        link_node_modules=link_node_modules,
+        link_venv=link_venv,
+        copy_env=copy_env,
+    )
 
     # Track the agent
     config["agents"][session_name] = {
