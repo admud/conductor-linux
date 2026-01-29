@@ -395,6 +395,10 @@ class ConductorUI(App):
         border: none;
     }
 
+    #perf-toggle {
+        margin-top: 1;
+    }
+
     #no-agent-message {
         width: 100%;
         height: 100%;
@@ -459,6 +463,7 @@ class ConductorUI(App):
         Binding("p", "spawn_pr", "Spawn PR"),
         Binding("f", "focus_archives_filter", "Filter Archives"),
         Binding("e", "edit_notes", "Edit Notes"),
+        Binding("m", "toggle_performance", "Perf Mode"),
         Binding("escape", "quit", "Quit"),
         Binding("1", "select_1", "Agent 1", show=False),
         Binding("2", "select_2", "Agent 2", show=False),
@@ -470,6 +475,7 @@ class ConductorUI(App):
     selected_agent: reactive[dict | None] = reactive(None)
     selected_archive: reactive[dict | None] = reactive(None)
     view_mode: reactive[str] = reactive("logs")  # "logs" | "diff" | "context"
+    performance_mode: reactive[bool] = reactive(False)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -477,6 +483,7 @@ class ConductorUI(App):
             with Vertical(id="sidebar"):
                 yield Static("AGENTS", id="sidebar-header")
                 yield ScrollableContainer(id="agents-container")
+                yield Button("Performance: OFF", id="perf-toggle", variant="default")
                 yield Static("ARCHIVES", id="archives-header")
                 yield Input(placeholder="Filter archives...", id="archives-filter")
                 yield ScrollableContainer(id="archives-container")
@@ -600,6 +607,10 @@ class ConductorUI(App):
                 log_view.write(f"  {line}")
             log_view.write("")
 
+        if self.performance_mode:
+            log_view.write("[dim]Performance mode: untracked files hidden.[/]")
+            return
+
         # Untracked files
         untracked = git.ls_files_untracked(worktree)
         if untracked:
@@ -719,6 +730,8 @@ class ConductorUI(App):
             self.refresh_agents()
             self.refresh_archives()
             self.refresh_view()
+        elif button_id == "perf-toggle":
+            self.action_toggle_performance()
         elif button_id == "btn-attach":
             self.action_attach()
         elif button_id == "btn-logs":
@@ -762,6 +775,12 @@ class ConductorUI(App):
     def action_show_diff(self) -> None:
         self.view_mode = "diff"
         self._update_header()
+        self.refresh_view()
+
+    def action_toggle_performance(self) -> None:
+        self.performance_mode = not self.performance_mode
+        button = self.query_one("#perf-toggle", Button)
+        button.label = "Performance: ON" if self.performance_mode else "Performance: OFF"
         self.refresh_view()
 
     def action_show_context(self) -> None:
