@@ -183,6 +183,37 @@ cdl pr view 1 --web
 cdl pr merge 1 --squash --delete-branch
 ```
 
+### Workspace Tools
+
+```bash
+# Open a worktree in your editor (defaults to $EDITOR/$VISUAL or 'code')
+cdl open 1
+cdl open 1 --editor nvim
+
+# Attach extra repos/dirs into a worktree
+cdl add-dir 1 /path/to/other-repo
+cdl add-dir 1 /path/to/dir --name vendor
+```
+
+### Setup Scripts
+
+Create `.cdl.json` in the repo root:
+
+```json
+{
+  "setup": [
+    "npm install",
+    "pip install -r requirements.txt"
+  ]
+}
+```
+
+Then run:
+
+```bash
+cdl spawn myrepo feature-branch --run-setup
+```
+
 ### Archive/Restore Workflow
 
 ```bash
