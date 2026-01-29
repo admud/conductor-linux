@@ -93,6 +93,22 @@ def _link_shared_paths(
             _copy_file(src, dest)
 
 
+def _detect_setup_hints(base_path: Path) -> list[str]:
+    """Detect common setup hints (docker, submodules)."""
+    hints = []
+    if (base_path / ".gitmodules").exists():
+        hints.append("Submodules detected. Consider: git submodule update --init --recursive")
+    if (base_path / "docker-compose.yml").exists() or (base_path / "docker-compose.yaml").exists():
+        hints.append("docker-compose.yml found. Consider: docker compose up")
+    if (base_path / "compose.yml").exists() or (base_path / "compose.yaml").exists():
+        hints.append("compose.yml found. Consider: docker compose up")
+    if (base_path / "package.json").exists():
+        hints.append("package.json found. Consider: npm install / pnpm install / yarn")
+    if (base_path / "pyproject.toml").exists() or (base_path / "requirements.txt").exists():
+        hints.append("Python project detected. Consider: pip install -r requirements.txt")
+    return hints
+
+
 def _find_repo_by_full_name(config: dict, full_name: str) -> Optional[str]:
     """Find a registered repo by GitHub full name (owner/name)."""
     full_name = full_name.lower().strip()
@@ -291,6 +307,13 @@ def cmd_spawn(args) -> None:
         link_venv=link_venv,
         copy_env=copy_env,
     )
+
+    # Setup hints
+    hints = _detect_setup_hints(base_path)
+    if hints:
+        print(c("\nSetup hints:", Colors.YELLOW))
+        for hint in hints:
+            print(f"  - {hint}")
 
     # Track the agent
     config["agents"][session_name] = {
