@@ -152,6 +152,7 @@ cdl restore
 | `cdl archive [n]` | | Archive a workspace |
 | `cdl restore [name]` | | Restore an archived workspace |
 | `cdl open [n]` | | Open a worktree in an editor |
+| `cdl add-dir [n] <path>` | | Attach extra repo/dir into a worktree |
 | `cdl-ui` | | Launch TUI dashboard |
 
 > **Note:** Commands without `[n]` argument will show an interactive picker (requires `fzf` or falls back to numbered menu).

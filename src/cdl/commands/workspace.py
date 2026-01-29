@@ -198,3 +198,36 @@ def cmd_open(args) -> None:
         print(c(f"+ Opened {worktree_path} in {editor}", Colors.GREEN))
     except FileNotFoundError:
         print(c(f"Editor not found: {editor}", Colors.RED))
+
+
+def cmd_add_dir(args) -> None:
+    """Attach an extra repo/dir into a worktree (symlink)."""
+    agent = _resolve_active_agent(args.session)
+    if not agent:
+        return
+
+    src = Path(args.path).expanduser().resolve()
+    if not src.exists():
+        print(c(f"Path not found: {src}", Colors.RED))
+        return
+
+    name = args.name or src.name
+    dest = Path(agent["worktree"]) / name
+    if dest.exists():
+        print(c(f"Destination already exists: {dest}", Colors.RED))
+        return
+
+    try:
+        dest.symlink_to(src)
+    except OSError:
+        print(c("Failed to create symlink.", Colors.RED))
+        return
+
+    config = load_config()
+    session = agent["session"]
+    if session in config.get("agents", {}):
+        config["agents"][session].setdefault("extra_dirs", [])
+        config["agents"][session]["extra_dirs"].append({"name": name, "path": str(src)})
+        save_config(config)
+
+    print(c(f"+ Attached {src} at {dest}", Colors.GREEN))

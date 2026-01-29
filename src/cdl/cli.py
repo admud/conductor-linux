@@ -155,6 +155,12 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
     p.add_argument("--editor", "-e", help="Editor command (code, nvim, idea, etc.)")
 
+    # add-dir
+    p = subparsers.add_parser("add-dir", help="Attach an extra repo/dir into a worktree")
+    p.add_argument("session", nargs="?", help="Agent number (fzf picker if omitted)")
+    p.add_argument("path", help="Path to repo/dir to attach")
+    p.add_argument("--name", help="Name for the attached dir (defaults to folder name)")
+
     # pr
     p = subparsers.add_parser("pr", help="GitHub pull request workflow")
     pr_sub = p.add_subparsers(dest="pr_command", help="PR commands")
@@ -231,6 +237,7 @@ def main() -> int:
         "archive": workspace.cmd_archive,
         "restore": workspace.cmd_restore,
         "open": workspace.cmd_open,
+        "add-dir": workspace.cmd_add_dir,
     }
 
     if command in commands:
