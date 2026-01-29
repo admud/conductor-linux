@@ -71,6 +71,7 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--link-node-modules", action="store_true", help="Symlink node_modules from base repo")
     p.add_argument("--link-venv", action="store_true", help="Symlink .venv from base repo")
     p.add_argument("--copy-env", action="store_true", help="Copy .env from base repo if present")
+    p.add_argument("--run-setup", action="store_true", help="Run setup scripts from .cdl.json")
     p.add_argument(
         "--agent", "-a",
         choices=["claude", "codex"],

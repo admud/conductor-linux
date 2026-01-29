@@ -6,6 +6,7 @@ from datetime import datetime
 import os
 import json
 from pathlib import Path
+import subprocess
 from typing import Optional
 
 from ..core import git, tmux
@@ -107,6 +108,47 @@ def _detect_setup_hints(base_path: Path) -> list[str]:
     if (base_path / "pyproject.toml").exists() or (base_path / "requirements.txt").exists():
         hints.append("Python project detected. Consider: pip install -r requirements.txt")
     return hints
+
+
+def _load_setup_commands(base_path: Path) -> list[str]:
+    """Load setup commands from .cdl.json or .cdl/config.json."""
+    candidates = [
+        base_path / ".cdl.json",
+        base_path / ".cdl" / "config.json",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return []
+        commands = data.get("setup", [])
+        if isinstance(commands, list) and all(isinstance(c, str) for c in commands):
+            return commands
+    return []
+
+
+def _run_setup_commands(worktree_path: Path, commands: list[str]) -> None:
+    """Run setup commands in the worktree."""
+    if not commands:
+        return
+    for cmd in commands:
+        try:
+            result = subprocess.run(
+                ["bash", "-lc", cmd],
+                cwd=str(worktree_path),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                print(c(f"Setup command failed: {cmd}", Colors.RED))
+                if result.stderr.strip():
+                    print(result.stderr.strip())
+                break
+        except OSError:
+            print(c(f"Failed to run setup command: {cmd}", Colors.RED))
+            break
 
 
 def _find_repo_by_full_name(config: dict, full_name: str) -> Optional[str]:
@@ -213,6 +255,7 @@ def cmd_spawn(args) -> None:
     link_node_modules = getattr(args, "link_node_modules", False)
     link_venv = getattr(args, "link_venv", False)
     copy_env = getattr(args, "copy_env", False)
+    run_setup = getattr(args, "run_setup", False)
 
     config = load_config()
 
@@ -314,6 +357,13 @@ def cmd_spawn(args) -> None:
         print(c("\nSetup hints:", Colors.YELLOW))
         for hint in hints:
             print(f"  - {hint}")
+
+    setup_cmds = _load_setup_commands(base_path)
+    if setup_cmds and not run_setup:
+        print(c("Setup scripts detected. Run with --run-setup to execute.", Colors.YELLOW))
+    if setup_cmds and run_setup:
+        print(c("Running setup scripts...", Colors.CYAN))
+        _run_setup_commands(worktree_path, setup_cmds)
 
     # Track the agent
     config["agents"][session_name] = {

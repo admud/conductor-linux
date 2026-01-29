@@ -208,6 +208,7 @@ Options:
   --link-node-modules Symlink node_modules from the base repo
   --link-venv         Symlink .venv from the base repo
   --copy-env          Copy .env from the base repo if present
+  --run-setup         Run setup scripts from .cdl.json
 ```
 
 > **Note:** `--from-pr` requires the GitHub CLI (`gh`) to be installed and authenticated.

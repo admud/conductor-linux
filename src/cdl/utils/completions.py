@@ -69,7 +69,7 @@ _cdl_completions() {
     # Complete flags
     case "${cur}" in
         -*)
-            local flags="-h --help -t --task -y --auto-accept -n --no-auto-accept -c --cleanup -f --follow --json -j --base --title --body --fill --draft --web --merge --squash --rebase --delete-branch --auto --from-pr --from-branch --keep-worktree --recreate --link-node-modules --link-venv --copy-env"
+            local flags="-h --help -t --task -y --auto-accept -n --no-auto-accept -c --cleanup -f --follow --json -j --base --title --body --fill --draft --web --merge --squash --rebase --delete-branch --auto --from-pr --from-branch --keep-worktree --recreate --link-node-modules --link-venv --copy-env --run-setup"
             COMPREPLY=( $(compgen -W "${flags}" -- ${cur}) )
             return 0
             ;;
@@ -221,4 +221,5 @@ complete -c cdl -n "__fish_seen_subcommand_from pr merge" -l auto -d "Enable aut
 complete -c cdl -n "__fish_seen_subcommand_from spawn" -l link-node-modules -d "Symlink node_modules from base repo"
 complete -c cdl -n "__fish_seen_subcommand_from spawn" -l link-venv -d "Symlink .venv from base repo"
 complete -c cdl -n "__fish_seen_subcommand_from spawn" -l copy-env -d "Copy .env from base repo"
+complete -c cdl -n "__fish_seen_subcommand_from spawn" -l run-setup -d "Run setup scripts from .cdl.json"
 '''
